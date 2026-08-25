@@ -1,0 +1,12 @@
+.gradle/
+build/
+local.properties
+.DS_Store
+*.apk
+*.aab
+.kotlin/
+captures/
+.idea/
+*.iml
+docs/loop-artifacts/
+test-results/
