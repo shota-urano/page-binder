@@ -2,16 +2,35 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Edit|Write",
         "hooks": [
-          { "type": "command", "command": "make lint", "timeout": 120 }
-        ]
+          {
+            "command": "make lint",
+            "timeout": 120,
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|Write"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "bd prime --hook-json",
+            "type": "command"
+          }
+        ],
+        "matcher": ""
       }
     ],
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "make verify-fast", "timeout": 300 }
+          {
+            "command": "make verify-fast",
+            "timeout": 300,
+            "type": "command"
+          }
         ]
       }
     ]
