@@ -95,6 +95,30 @@ class RoomExportRecordRepositoryTest {
         }
 
     @Test
+    fun findIncompleteReturnsOnlyQueuedAndRunningRecords() =
+        runBlocking {
+            val runningId = UUID.fromString("10000000-0000-0000-0000-000000000003")
+            val succeededId = UUID.fromString("10000000-0000-0000-0000-000000000004")
+            val queued = record(state = ExportState.QUEUED)
+            val running =
+                record(
+                    state = ExportState.RUNNING,
+                    targetUri = "content://provider/document/redacted",
+                ).copy(id = runningId)
+            val succeeded =
+                record(
+                    state = ExportState.SUCCEEDED,
+                    targetUri = "content://provider/document/complete",
+                    completedAt = now.plusSeconds(1),
+                ).copy(id = succeededId)
+            repository.insert(queued)
+            repository.insert(running)
+            repository.insert(succeeded)
+
+            assertEquals(listOf(queued, running), repository.findIncomplete())
+        }
+
+    @Test
     fun staleExpectedRecordCannotOverwriteNewerValue() =
         runBlocking {
             val queued = record(state = ExportState.QUEUED)
