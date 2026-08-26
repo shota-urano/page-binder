@@ -1,5 +1,7 @@
 package com.pagebinder.app.export
 
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
@@ -32,30 +34,33 @@ data class CompleteZipInput(
 /** Packages export artifacts without depending on Android or storage framework types. */
 object ExportZipPackager {
     /** Writes the `text_zip` format. Entry order is ascending page sequence. */
-    fun writeTextZip(
+    suspend fun writeTextZip(
         textFiles: List<GeneratedTextFile>,
         output: OutputStream,
+        reportProgress: suspend (completedEntries: Int, totalEntries: Int) -> Unit = { _, _ -> },
     ) {
         val entries = textEntries(textFiles)
-        writeZip(entries, output)
+        writeZip(entries, output, reportProgress)
     }
 
     /** Writes the `image_zip` format: original images followed by manifest.json. */
-    fun writeImageZip(
+    suspend fun writeImageZip(
         images: List<ExportImage>,
         manifestJson: String,
         output: OutputStream,
+        reportProgress: suspend (completedEntries: Int, totalEntries: Int) -> Unit = { _, _ -> },
     ) {
         val entries =
             imageEntries(images) +
                 textEntry(MANIFEST_FILE_NAME, manifestJson)
-        writeZip(entries, output)
+        writeZip(entries, output, reportProgress)
     }
 
     /** Writes the complete section 3.3 directory tree for single-file-only destinations. */
-    fun writeCompleteZip(
+    suspend fun writeCompleteZip(
         input: CompleteZipInput,
         output: OutputStream,
+        reportProgress: suspend (completedEntries: Int, totalEntries: Int) -> Unit = { _, _ -> },
     ) {
         requirePathSegment(input.sanitizedTitle, "Sanitized title")
         requirePathSegment(input.artifactBaseName, "Artifact base name")
@@ -71,7 +76,7 @@ object ExportZipPackager {
                 imageEntries(input.images, root) +
                 textEntry("$root$MANIFEST_FILE_NAME", input.manifestJson)
 
-        writeZip(entries, output)
+        writeZip(entries, output, reportProgress)
     }
 }
 
@@ -131,9 +136,10 @@ private fun textEntry(
         content.byteInputStream(StandardCharsets.UTF_8)
     }
 
-private fun writeZip(
+private suspend fun writeZip(
     entries: List<PendingZipEntry>,
     output: OutputStream,
+    reportProgress: suspend (completedEntries: Int, totalEntries: Int) -> Unit,
 ) {
     require(entries.map { it.path }.distinct().size == entries.size) {
         "ZIP entry paths must be unique"
@@ -141,11 +147,22 @@ private fun writeZip(
     entries.forEach { requireSafeEntryPath(it.path) }
 
     ZipOutputStream(NonClosingOutputStream(output), StandardCharsets.UTF_8).use { zip ->
-        entries.forEach { pending ->
+        reportProgress(0, entries.size.coerceAtLeast(1))
+        entries.forEachIndexed { index, pending ->
+            currentCoroutineContext().ensureActive()
             val entry = ZipEntry(pending.path).apply { time = DETERMINISTIC_ENTRY_TIME_MILLIS }
             zip.putNextEntry(entry)
-            pending.content.openStream().use { input -> input.copyTo(zip) }
+            pending.content.openStream().use { input ->
+                val buffer = ByteArray(ZIP_COPY_BUFFER_SIZE)
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    zip.write(buffer, 0, count)
+                }
+            }
             zip.closeEntry()
+            reportProgress(index + 1, entries.size.coerceAtLeast(1))
         }
     }
 }
@@ -187,3 +204,4 @@ private val PAGE_TEXT_FILE_PATTERN = Regex("page-(\\d{4})\\.txt")
 private const val MANIFEST_FILE_NAME = "manifest.json"
 private const val MAX_FOUR_DIGIT_PAGE = 9999
 private const val DETERMINISTIC_ENTRY_TIME_MILLIS = 0L
+private const val ZIP_COPY_BUFFER_SIZE = 8 * 1024

@@ -8,6 +8,11 @@ import com.pagebinder.app.domain.ExportState
 import com.pagebinder.app.domain.ExportStorageGateway
 import com.pagebinder.app.domain.ExportStorageResult
 import com.pagebinder.app.domain.ExportType
+import com.pagebinder.app.domain.PdfGateway
+import com.pagebinder.app.domain.PdfImageSource
+import com.pagebinder.app.domain.PdfInput
+import com.pagebinder.app.domain.PdfMode
+import com.pagebinder.app.domain.PdfPage
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
@@ -21,11 +26,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.IOException
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.zip.ZipInputStream
 
 class ExportEngineTest {
     @get:Rule
@@ -75,6 +83,7 @@ class ExportEngineTest {
                     exportsCacheDirectory = cache,
                     recordCoordinator = coordinator(repository),
                     storageGateway = storage,
+                    pdfGateway = unusedPdfGateway(),
                     artifactGenerator = StandardExportArtifactGenerator(Dispatchers.Unconfined),
                 )
 
@@ -85,6 +94,203 @@ class ExportEngineTest {
             assertEquals(ExportState.SUCCEEDED, repository.findById(recordId)?.state)
             assertTrue(events.any { it is ExportEvent.Progress && it.phase == ExportPhase.GENERATING })
             assertTrue(events.last() is ExportEvent.Succeeded)
+            assertTrue(cache.listFiles().orEmpty().isEmpty())
+        }
+
+    @Test
+    fun `markdown reports intermediate progress for every production page`() =
+        runTest {
+            val cache = temporaryFolder.newFolder("exports-cache-markdown-progress")
+            val repository = InMemoryExportRecordRepository()
+            val engine =
+                ExportEngine(
+                    exportsCacheDirectory = cache,
+                    recordCoordinator = coordinator(repository),
+                    storageGateway = RecordingStorageGateway(),
+                    pdfGateway = unusedPdfGateway(),
+                    artifactGenerator = StandardExportArtifactGenerator(Dispatchers.Unconfined),
+                )
+            val request =
+                ExportRequest(
+                    projectId,
+                    ExportDestination("content://provider/document/redacted"),
+                    ExportArtifact.Markdown(
+                        listOf(
+                            TextExportPage(1, "one", null),
+                            TextExportPage(2, "two", null),
+                            TextExportPage(3, "three", null),
+                        ),
+                    ),
+                )
+
+            val generating =
+                engine.export(request).toList().filterIsInstance<ExportEvent.Progress>()
+                    .filter { it.phase == ExportPhase.GENERATING }
+
+            assertEquals(listOf(0, 1, 2, 3), generating.map { it.completedUnits }.distinct())
+            assertTrue(generating.all { it.totalUnits == 3 })
+        }
+
+    @Test
+    fun `engine selects searchable and image only PdfGateway modes with page progress`() =
+        runTest {
+            val cases =
+                listOf(
+                    PdfMode.SEARCHABLE to { input: PdfInput -> ExportArtifact.SearchablePdf(input) },
+                    PdfMode.IMAGE_ONLY to { input: PdfInput -> ExportArtifact.ImagePdf(input) },
+                )
+
+            cases.forEachIndexed { index, (expectedMode, artifact) ->
+                val cache = temporaryFolder.newFolder("exports-cache-pdf-$index")
+                val repository = InMemoryExportRecordRepository()
+                val gateway = RecordingPdfGateway()
+                val storage = RecordingStorageGateway()
+                val input = pdfInput(3)
+                val engine =
+                    ExportEngine(
+                        cache,
+                        coordinator(repository),
+                        storage,
+                        gateway,
+                        StandardExportArtifactGenerator(Dispatchers.Unconfined),
+                    )
+
+                val events =
+                    engine.export(
+                        ExportRequest(
+                            projectId,
+                            ExportDestination("content://provider/document/redacted"),
+                            artifact(input),
+                        ),
+                    ).toList()
+                val generating =
+                    events.filterIsInstance<ExportEvent.Progress>()
+                        .filter { it.phase == ExportPhase.GENERATING }
+
+                assertEquals(expectedMode, gateway.mode)
+                assertEquals(listOf(1, 2, 3), gateway.sequences)
+                assertEquals("pdf-$expectedMode", storage.content)
+                assertEquals(listOf(0, 1, 2, 3), generating.map { it.completedUnits })
+                assertTrue(events.last() is ExportEvent.Succeeded)
+            }
+        }
+
+    @Test
+    fun `PdfGateway failure is propagated and incomplete cache is removed`() =
+        runTest {
+            val cache = temporaryFolder.newFolder("exports-cache-pdf-failure")
+            val repository = InMemoryExportRecordRepository()
+            val failingGateway =
+                PdfGateway { _, _, output, reportProgress ->
+                    reportProgress(0, 2)
+                    output.write("partial".toByteArray())
+                    reportProgress(1, 2)
+                    throw IOException("PDF generation failed")
+                }
+            val engine =
+                ExportEngine(
+                    cache,
+                    coordinator(repository),
+                    RecordingStorageGateway(),
+                    failingGateway,
+                    StandardExportArtifactGenerator(Dispatchers.Unconfined),
+                )
+
+            val events =
+                engine.export(
+                    ExportRequest(
+                        projectId,
+                        ExportDestination("content://provider/document/redacted"),
+                        ExportArtifact.SearchablePdf(pdfInput(2)),
+                    ),
+                ).toList()
+
+            assertEquals("generation_failed", (events.last() as ExportEvent.Failed).errorCode)
+            assertEquals(ExportState.FAILED, repository.findById(recordId)?.state)
+            assertTrue(cache.listFiles().orEmpty().isEmpty())
+        }
+
+    @Test
+    fun `image zip generates matching manifest internally and reports every entry`() =
+        runTest {
+            val cache = temporaryFolder.newFolder("exports-cache-image-zip")
+            val repository = InMemoryExportRecordRepository()
+            val storage = RecordingStorageGateway()
+            val images =
+                listOf(
+                    ExportImage(2) { ByteArrayInputStream(byteArrayOf(2)) },
+                    ExportImage(1) { ByteArrayInputStream(byteArrayOf(1)) },
+                )
+            val manifestInput = manifestInput(1, 2)
+            val engine =
+                ExportEngine(
+                    cache,
+                    coordinator(repository),
+                    storage,
+                    unusedPdfGateway(),
+                    StandardExportArtifactGenerator(Dispatchers.Unconfined),
+                )
+
+            val events =
+                engine.export(
+                    ExportRequest(
+                        projectId,
+                        ExportDestination("content://provider/document/redacted"),
+                        ExportArtifact.ImageZip(images, manifestInput),
+                    ),
+                ).toList()
+            val generating =
+                events.filterIsInstance<ExportEvent.Progress>()
+                    .filter { it.phase == ExportPhase.GENERATING }
+            val zipEntries = linkedMapOf<String, String>()
+            ZipInputStream(ByteArrayInputStream(requireNotNull(storage.bytes))).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    zipEntries[entry.name] = zip.readBytes().toString(Charsets.UTF_8)
+                    zip.closeEntry()
+                    entry = zip.nextEntry
+                }
+            }
+
+            assertEquals(
+                listOf("images/page-0001.webp", "images/page-0002.webp", "manifest.json"),
+                zipEntries.keys.toList(),
+            )
+            assertEquals(ManifestGenerator.generate(manifestInput), zipEntries["manifest.json"])
+            assertEquals(listOf(0, 1, 2, 3), generating.map { it.completedUnits }.distinct())
+            assertTrue(generating.all { it.totalUnits == 3 })
+        }
+
+    @Test
+    fun `image zip rejects manifest pages that do not match exported images`() =
+        runTest {
+            val cache = temporaryFolder.newFolder("exports-cache-image-zip-mismatch")
+            val repository = InMemoryExportRecordRepository()
+            val storage = RecordingStorageGateway()
+            val engine =
+                ExportEngine(
+                    cache,
+                    coordinator(repository),
+                    storage,
+                    unusedPdfGateway(),
+                    StandardExportArtifactGenerator(Dispatchers.Unconfined),
+                )
+
+            val events =
+                engine.export(
+                    ExportRequest(
+                        projectId,
+                        ExportDestination("content://provider/document/redacted"),
+                        ExportArtifact.ImageZip(
+                            images = listOf(ExportImage(1) { ByteArrayInputStream(byteArrayOf(1)) }),
+                            manifestInput = manifestInput(2),
+                        ),
+                    ),
+                ).toList()
+
+            assertEquals("generation_failed", (events.last() as ExportEvent.Failed).errorCode)
+            assertEquals(ExportState.FAILED, repository.findById(recordId)?.state)
+            assertNull(storage.bytes)
             assertTrue(cache.listFiles().orEmpty().isEmpty())
         }
 
@@ -127,6 +333,7 @@ class ExportEngineTest {
         exportsCacheDirectory = cache,
         recordCoordinator = coordinator(repository),
         storageGateway = RecordingStorageGateway(),
+        pdfGateway = unusedPdfGateway(),
         artifactGenerator = generator,
     )
 
@@ -146,6 +353,39 @@ class ExportEngineTest {
                     listOf(TextExportPage(sequence = 1, fullText = "original", editedText = "edited")),
                 ),
         )
+
+    private fun pdfInput(pageCount: Int) =
+        PdfInput(
+            (1..pageCount).map { sequence ->
+                PdfPage(
+                    sequence = sequence,
+                    image = PdfImageSource { ByteArrayInputStream(byteArrayOf(sequence.toByte())) },
+                    ocrBlocksJson = "[]",
+                    fullText = "page $sequence",
+                    editedText = null,
+                )
+            },
+        )
+
+    private fun manifestInput(vararg sequences: Int) =
+        ManifestInput(
+            appVersion = "1.0",
+            project = ManifestProject("Book", null, null, now),
+            exportedAt = now,
+            ocrEngineVersion = "test",
+            pages =
+                sequences.map { sequence ->
+                    ManifestPage(
+                        sequence,
+                        now,
+                        ManifestOcrState.SUCCEEDED,
+                        "hash-$sequence",
+                        false,
+                    )
+                },
+        )
+
+    private fun unusedPdfGateway() = PdfGateway { _, _, _, _ -> error("Unexpected PDF generation") }
 
     private fun record(
         id: UUID,
@@ -186,16 +426,38 @@ class ExportEngineTest {
     }
 
     private class RecordingStorageGateway : ExportStorageGateway {
-        var content: String? = null
+        var bytes: ByteArray? = null
             private set
+        val content: String?
+            get() = bytes?.toString(Charsets.UTF_8)
 
         override suspend fun write(
             source: CompletedExportSource,
             destination: ExportDestination,
         ): ExportStorageResult {
-            val bytes = source.openInputStream().use { it.readBytes() }
-            content = bytes.toString(Charsets.UTF_8)
-            return ExportStorageResult.Succeeded(bytes.size.toLong())
+            val generated = source.openInputStream().use { it.readBytes() }
+            bytes = generated
+            return ExportStorageResult.Succeeded(generated.size.toLong())
+        }
+    }
+
+    private class RecordingPdfGateway : PdfGateway {
+        var mode: PdfMode? = null
+            private set
+        var sequences: List<Int> = emptyList()
+            private set
+
+        override suspend fun generate(
+            input: PdfInput,
+            mode: PdfMode,
+            output: java.io.OutputStream,
+            reportProgress: suspend (completedPages: Int, totalPages: Int) -> Unit,
+        ) {
+            this.mode = mode
+            sequences = input.pages.map(PdfPage::sequence)
+            reportProgress(0, input.pages.size)
+            input.pages.forEachIndexed { index, _ -> reportProgress(index + 1, input.pages.size) }
+            output.write("pdf-$mode".toByteArray())
         }
     }
 }

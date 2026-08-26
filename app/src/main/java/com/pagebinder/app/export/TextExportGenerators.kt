@@ -19,7 +19,7 @@ data class GeneratedTextFile(
 /** Generates the single Markdown artifact described by docs/specs/11-export.md section 3.1. */
 object MarkdownGenerator {
     fun generate(pages: List<TextExportPage>): String =
-        pages.validatedInSequenceOrder().joinToString(separator = "\n\n---\n\n") { page ->
+        pages.validatedTextExportPages().joinToString(separator = "\n\n---\n\n") { page ->
             "## Page ${page.sequence}\n\n${page.outputText}"
         }
 }
@@ -27,7 +27,7 @@ object MarkdownGenerator {
 /** Generates page-scoped TXT artifacts described by docs/specs/02-data-model.md section 3.3. */
 object PageTextGenerator {
     fun generate(pages: List<TextExportPage>): List<GeneratedTextFile> =
-        pages.validatedInSequenceOrder().map { page ->
+        pages.validatedTextExportPages().map { page ->
             GeneratedTextFile(
                 fileName = "page-${page.sequence.asPageNumber()}.txt",
                 content = page.outputText,
@@ -37,7 +37,7 @@ object PageTextGenerator {
 
 internal fun Int.asPageNumber(): String = toString().padStart(PAGE_NUMBER_WIDTH, '0')
 
-private fun List<TextExportPage>.validatedInSequenceOrder(): List<TextExportPage> {
+internal fun List<TextExportPage>.validatedTextExportPages(): List<TextExportPage> {
     require(all { it.sequence >= 1 }) { "Page sequence must start at 1" }
     require(map { it.sequence }.distinct().size == size) { "Page sequences must be unique" }
     return sortedBy(TextExportPage::sequence)

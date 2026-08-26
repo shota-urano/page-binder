@@ -1,6 +1,5 @@
 package com.pagebinder.app.export
 
-import com.pagebinder.app.domain.CompletedExportSource
 import com.pagebinder.app.domain.ExportDestination
 import com.pagebinder.app.domain.ExportRecord
 import com.pagebinder.app.domain.ExportRecordRepository
@@ -9,6 +8,9 @@ import com.pagebinder.app.domain.ExportStorageErrorCode
 import com.pagebinder.app.domain.ExportStorageGateway
 import com.pagebinder.app.domain.ExportStorageResult
 import com.pagebinder.app.domain.ExportType
+import com.pagebinder.app.domain.PdfGateway
+import com.pagebinder.app.domain.PdfInput
+import com.pagebinder.app.domain.PdfMode
 import com.pagebinder.app.storage.CompletedCacheExport
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -28,11 +30,11 @@ import java.util.UUID
 sealed interface ExportArtifact {
     val type: ExportType
 
-    data class SearchablePdf(val content: CompletedExportSource) : ExportArtifact {
+    data class SearchablePdf(val input: PdfInput) : ExportArtifact {
         override val type = ExportType.SEARCHABLE_PDF
     }
 
-    data class ImagePdf(val content: CompletedExportSource) : ExportArtifact {
+    data class ImagePdf(val input: PdfInput) : ExportArtifact {
         override val type = ExportType.IMAGE_PDF
     }
 
@@ -46,7 +48,7 @@ sealed interface ExportArtifact {
 
     data class ImageZip(
         val images: List<ExportImage>,
-        val manifestJson: String,
+        val manifestInput: ManifestInput,
     ) : ExportArtifact {
         override val type = ExportType.IMAGE_ZIP
     }
@@ -94,8 +96,8 @@ fun interface ExportArtifactGenerator {
 }
 
 /**
- * Framework-independent format dispatcher. PDF bytes are supplied by PdfGateway's eventual
- * domain output; the text and ZIP variants use PageBinder's production generators directly.
+ * Framework-independent dispatcher for the text and ZIP formats. PDF mode selection remains an
+ * Export Engine responsibility and is delegated directly to PdfGateway there.
  */
 class StandardExportArtifactGenerator(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -107,47 +109,57 @@ class StandardExportArtifactGenerator(
     ) = withContext(ioDispatcher) {
         reportProgress(0, artifact.totalUnits())
         when (artifact) {
-            is ExportArtifact.SearchablePdf -> copyPdf(artifact.content, outputFile)
-            is ExportArtifact.ImagePdf -> copyPdf(artifact.content, outputFile)
+            is ExportArtifact.SearchablePdf,
+            is ExportArtifact.ImagePdf,
+            -> error("PDF artifacts must be coordinated by ExportEngine")
             is ExportArtifact.Markdown ->
-                outputFile.writeText(
-                    MarkdownGenerator.generate(artifact.pages),
-                    StandardCharsets.UTF_8,
-                )
+                writeMarkdown(artifact.pages, outputFile, reportProgress)
             is ExportArtifact.TextZip ->
                 outputFile.outputStream().buffered().use { output ->
-                    ExportZipPackager.writeTextZip(PageTextGenerator.generate(artifact.pages), output)
+                    ExportZipPackager.writeTextZip(
+                        PageTextGenerator.generate(artifact.pages),
+                        output,
+                        reportProgress,
+                    )
                 }
             is ExportArtifact.ImageZip ->
                 outputFile.outputStream().buffered().use { output ->
-                    ExportZipPackager.writeImageZip(artifact.images, artifact.manifestJson, output)
+                    requireManifestMatchesImages(artifact)
+                    ExportZipPackager.writeImageZip(
+                        artifact.images,
+                        ManifestGenerator.generate(artifact.manifestInput),
+                        output,
+                        reportProgress,
+                    )
                 }
         }
         currentCoroutineContext().ensureActive()
-        reportProgress(artifact.totalUnits(), artifact.totalUnits())
     }
 
-    private suspend fun copyPdf(
-        source: CompletedExportSource,
+    private suspend fun writeMarkdown(
+        pages: List<TextExportPage>,
         outputFile: File,
+        reportProgress: suspend (completedUnits: Int, totalUnits: Int) -> Unit,
     ) {
-        require(source.byteCount >= 0L) { "PDF source must be complete" }
-        val copied =
-            outputFile.outputStream().buffered().use { output ->
-                source.openInputStream().buffered().use { input ->
-                    var total = 0L
-                    val buffer = ByteArray(COPY_BUFFER_SIZE)
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        total += count
-                    }
-                    total
-                }
+        val ordered = pages.validatedTextExportPages()
+        val total = ordered.size.coerceAtLeast(1)
+        outputFile.bufferedWriter(StandardCharsets.UTF_8).use { writer ->
+            ordered.forEachIndexed { index, page ->
+                currentCoroutineContext().ensureActive()
+                if (index > 0) writer.write("\n\n---\n\n")
+                writer.write("## Page ${page.sequence}\n\n${page.outputText}")
+                reportProgress(index + 1, total)
             }
-        check(copied == source.byteCount) { "PDF source changed during generation" }
+        }
+        if (ordered.isEmpty()) reportProgress(total, total)
+    }
+
+    private fun requireManifestMatchesImages(artifact: ExportArtifact.ImageZip) {
+        val imageSequences = artifact.images.map(ExportImage::sequence).sorted()
+        val manifestSequences = artifact.manifestInput.pages.map(ManifestPage::sequence).sorted()
+        require(imageSequences == manifestSequences) {
+            "Manifest pages must exactly match exported images"
+        }
     }
 }
 
@@ -156,6 +168,7 @@ class ExportEngine(
     private val exportsCacheDirectory: File,
     private val recordCoordinator: ExportRecordCoordinator,
     private val storageGateway: ExportStorageGateway,
+    private val pdfGateway: PdfGateway,
     private val artifactGenerator: ExportArtifactGenerator = StandardExportArtifactGenerator(),
 ) {
     fun export(request: ExportRequest): Flow<ExportEvent> =
@@ -173,7 +186,7 @@ class ExportEngine(
             try {
                 running = recordCoordinator.markRunning(queued.id, request.destination.uri)
                 sendProgress(queued.id, ExportPhase.QUEUED, 0, 1)
-                artifactGenerator.generate(request.artifact, partialFile) { completed, total ->
+                generateArtifact(request.artifact, partialFile) { completed, total ->
                     require(total > 0 && completed in 0..total) { "Invalid export progress" }
                     sendProgress(queued.id, ExportPhase.GENERATING, completed, total)
                 }
@@ -219,6 +232,31 @@ class ExportEngine(
                 cleanup(partialFile, completedFile)
             }
         }
+
+    private suspend fun generateArtifact(
+        artifact: ExportArtifact,
+        outputFile: File,
+        reportProgress: suspend (completedUnits: Int, totalUnits: Int) -> Unit,
+    ) {
+        when (artifact) {
+            is ExportArtifact.SearchablePdf ->
+                generatePdf(artifact.input, PdfMode.SEARCHABLE, outputFile, reportProgress)
+            is ExportArtifact.ImagePdf ->
+                generatePdf(artifact.input, PdfMode.IMAGE_ONLY, outputFile, reportProgress)
+            else -> artifactGenerator.generate(artifact, outputFile, reportProgress)
+        }
+    }
+
+    private suspend fun generatePdf(
+        input: PdfInput,
+        mode: PdfMode,
+        outputFile: File,
+        reportProgress: suspend (completedUnits: Int, totalUnits: Int) -> Unit,
+    ) {
+        outputFile.outputStream().buffered().use { output ->
+            pdfGateway.generate(input, mode, output, reportProgress)
+        }
+    }
 
     private suspend fun SendChannel<ExportEvent>.sendProgress(
         recordId: UUID,
@@ -286,11 +324,9 @@ private fun ExportArtifact.totalUnits(): Int =
         is ExportArtifact.Markdown -> pages.size.coerceAtLeast(1)
         is ExportArtifact.TextZip -> pages.size.coerceAtLeast(1)
         is ExportArtifact.ImageZip -> (images.size + 1).coerceAtLeast(1)
-        is ExportArtifact.SearchablePdf,
-        is ExportArtifact.ImagePdf,
-        -> 1
+        is ExportArtifact.SearchablePdf -> input.pages.size.coerceAtLeast(1)
+        is ExportArtifact.ImagePdf -> input.pages.size.coerceAtLeast(1)
     }
 
 private const val ERROR_CANCELLED = "cancelled"
 private const val ERROR_GENERATION_FAILED = "generation_failed"
-private const val COPY_BUFFER_SIZE = 8 * 1024
