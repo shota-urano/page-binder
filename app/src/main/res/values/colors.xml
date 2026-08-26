@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- docs/design/system/01-tokens.md の color-background（起動時のウィンドウ地色用） -->
+    <color name="pagebinder_background">#F8FAFC</color>
+</resources>

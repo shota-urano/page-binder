@@ -1,4 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">PageBinder</string>
+
+    <!-- 初回同意画面（docs/design/12-consent.md / docs/specs/12-legal-guardrails.md §3.1）
+         法務系文言は specs を正とし、言い換えない -->
+    <string name="consent_logo_description">PageBinder のロゴ</string>
+    <string name="consent_tagline">画面を撮って、検索できる本棚に。\nすべて端末の中だけで。</string>
+    <string name="consent_card_title">ご利用の前に</string>
+    <string name="consent_term_lawful_content">正当に閲覧できるコンテンツのみを対象にしてください</string>
+    <string name="consent_term_user_verifies_reuse">複製や外部サービスへの入力の可否は、ご自身で確認してください</string>
+    <string name="consent_term_no_protection_bypass">撮影が禁止・保護されている画面を回避する機能はありません</string>
+    <string name="consent_term_no_unauthorized_distribution">出力物を無断で配布しないでください</string>
+    <string name="consent_agree">同意して始める</string>
+    <string name="consent_decline">同意しない</string>
+    <string name="consent_decline_notice">同意しない場合、PageBinder の機能はご利用いただけません。</string>
+    <string name="consent_save_failed">同意を保存できませんでした。もう一度お試しください。</string>
+
+    <!-- 書き出し時の権限確認（docs/design/11-export.md / docs/specs/12-legal-guardrails.md §3.2）
+         export_consent_confirm は specs §4 の確定文言。言い換えない -->
+    <string name="export_consent_title">利用上の注意</string>
+    <string name="export_consent_description">書き出した成果物の取り扱いは利用者の責任で確認してください</string>
+    <string name="export_consent_confirm">この成果物を利用する権限を確認しました</string>
+    <string name="export_consent_required">書き出すには、上の確認にチェックしてください</string>
 </resources>
