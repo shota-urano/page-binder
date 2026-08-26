@@ -105,6 +105,9 @@ class ExportRecordCoordinatorTest {
 
         override suspend fun findById(id: UUID): ExportRecord? = records[id]
 
+        override suspend fun findIncomplete(): List<ExportRecord> =
+            records.values.filter { it.state == ExportState.QUEUED || it.state == ExportState.RUNNING }
+
         override suspend fun compareAndSet(
             expected: ExportRecord,
             updated: ExportRecord,

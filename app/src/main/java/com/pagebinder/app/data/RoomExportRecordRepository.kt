@@ -40,6 +40,9 @@ interface ExportRecordDao {
     @Query("SELECT * FROM export_records WHERE id = :id")
     suspend fun findById(id: String): ExportRecordEntity?
 
+    @Query("SELECT * FROM export_records WHERE state IN ('queued', 'running') ORDER BY created_at, id")
+    suspend fun findIncomplete(): List<ExportRecordEntity>
+
     @Query(
         """
         UPDATE export_records
@@ -88,6 +91,8 @@ class RoomExportRecordRepository(
     }
 
     override suspend fun findById(id: UUID): ExportRecord? = dao.findById(id.toString())?.toDomain()
+
+    override suspend fun findIncomplete(): List<ExportRecord> = dao.findIncomplete().map(ExportRecordEntity::toDomain)
 
     override suspend fun compareAndSet(
         expected: ExportRecord,

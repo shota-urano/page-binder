@@ -40,6 +40,9 @@ interface ExportRecordRepository {
 
     suspend fun findById(id: UUID): ExportRecord?
 
+    /** Records left unfinished by cancellation or process termination. */
+    suspend fun findIncomplete(): List<ExportRecord>
+
     suspend fun compareAndSet(
         expected: ExportRecord,
         updated: ExportRecord,
