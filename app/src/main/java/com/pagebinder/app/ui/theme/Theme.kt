@@ -30,6 +30,9 @@ val MinTouchTarget = 48.dp
 val CardCornerRadius = 12.dp
 val ButtonCornerRadius = 8.dp
 
+// docs/design/system/02-components.md「ボタン」の disabled = 38%不透明
+const val DISABLED_ALPHA = 0.38f
+
 private val PageBinderColorScheme =
     lightColorScheme(
         primary = ColorPrimary,

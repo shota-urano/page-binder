@@ -2,6 +2,8 @@ package com.pagebinder.app.ui.consent
 
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,6 +26,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -36,7 +40,9 @@ import com.pagebinder.app.legal.ConsentTerm
 import com.pagebinder.app.ui.theme.ButtonCornerRadius
 import com.pagebinder.app.ui.theme.CardCornerRadius
 import com.pagebinder.app.ui.theme.ColorPrimary
+import com.pagebinder.app.ui.theme.ColorPrimaryDark
 import com.pagebinder.app.ui.theme.ColorTextSecondary
+import com.pagebinder.app.ui.theme.DISABLED_ALPHA
 import com.pagebinder.app.ui.theme.MinTouchTarget
 import com.pagebinder.app.ui.theme.ScreenHorizontalMargin
 import com.pagebinder.app.ui.theme.SpaceUnit
@@ -176,11 +182,22 @@ private fun ConsentActions(
                 color = MaterialTheme.colorScheme.error,
             )
         }
+        // Primary ボタン（docs/design/system/02-components.md）:
+        // default = --color-primary / pressed = --color-primary-dark / disabled = 38%不透明
+        val agreeInteractionSource = remember { MutableInteractionSource() }
+        val agreePressed by agreeInteractionSource.collectIsPressedAsState()
         Button(
             onClick = onAgree,
             enabled = !uiState.saving,
             shape = RoundedCornerShape(ButtonCornerRadius),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+            interactionSource = agreeInteractionSource,
+            colors =
+                ButtonDefaults.buttonColors(
+                    containerColor = if (agreePressed) ColorPrimaryDark else ColorPrimary,
+                    contentColor = Color.White,
+                    disabledContainerColor = ColorPrimary.copy(alpha = DISABLED_ALPHA),
+                    disabledContentColor = Color.White.copy(alpha = DISABLED_ALPHA),
+                ),
             modifier =
                 Modifier
                     .fillMaxWidth()
