@@ -35,8 +35,9 @@ import com.pagebinder.app.ui.theme.SpaceUnit
  * 書き出し時の「利用上の注意」カード（docs/design/11-export.md / docs/specs/12-legal-guardrails.md §3.2）。
  *
  * 再利用部品なので ViewModel を持たない（AGENTS.md §8）。状態は [uiState] で受け、
- * チェックの変更は [onPermissionConfirmedChange] で呼び出し側（書き出し画面の ViewModel）へ返す。
- * 書き出しを開始してよいかの判定は [ExportConsentUiState.canStartExport] / [ExportConsentGate] 側にある。
+ * チェックの変更は [onPermissionConfirmedChange] で呼び出し側（[ExportViewModel]）へ返す。
+ * 書き出しを開始してよいかの判定は [ExportConsentUiState.canStartExport] にあり、
+ * それを実際に効かせるのは [ExportViewModel.onStartExportRequested]（書き出し開始の唯一の入口）。
  *
  * 表示文言は文字列リソースが持つ。権限確認の文言は specs 12 §4 の確定文言であり言い換えない。
  */
