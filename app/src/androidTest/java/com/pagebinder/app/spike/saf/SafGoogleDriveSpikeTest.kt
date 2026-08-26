@@ -11,13 +11,16 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.io.FileNotFoundException
+import java.io.IOException
+import java.io.OutputStream
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
@@ -34,19 +37,16 @@ class SafGoogleDriveSpikeTest {
         val sourceSha256 = sha256(sourceBytes)
 
         val pickerStartedAt = System.nanoTime()
-        launchPicker(targetContext, fileName)
-        selectDriveAndSave(instrumentation)
-        val pickerResult = requireNotNull(SafPickerSpikeActivity.awaitResult(PICKER_TIMEOUT_SECONDS))
+        val pickerResult = createDriveDocument(instrumentation, targetContext, fileName)
         val selectedUri = requireNotNull(pickerResult.uri)
         val pickerElapsedMs = elapsedMillis(pickerStartedAt)
         assertEquals(Activity.RESULT_OK, pickerResult.resultCode)
         assertEquals(DRIVE_AUTHORITY, selectedUri.authority)
 
         val writeStartedAt = System.nanoTime()
-        targetContext.contentResolver.openOutputStream(selectedUri, "w").use { output ->
-            requireNotNull(output).write(sourceBytes)
-        }
+        val successfulWrite = writeToProvider(targetContext, selectedUri, sourceBytes)
         val writeElapsedMs = elapsedMillis(writeStartedAt)
+        assertTrue("Expected the selected Drive write to complete", successfulWrite is ProviderWriteResult.Completed)
 
         val readBackStartedAt = System.nanoTime()
         val readBack = readWithRetry(targetContext, selectedUri)
@@ -60,8 +60,36 @@ class SafGoogleDriveSpikeTest {
         assertEquals(Activity.RESULT_CANCELED, cancelledResult.resultCode)
         assertNull(cancelledResult.uri)
 
-        val providerWriteError = captureInvalidDriveDocumentWriteError(targetContext)
-        assertNotNull("Expected an invalid Drive document write to fail", providerWriteError)
+        val ungrantedUriError = assertUngrantedDriveDocumentIsRejected(targetContext)
+
+        val failingPickerResult =
+            createDriveDocument(
+                instrumentation,
+                targetContext,
+                "pagebinder-saf-failure-${System.currentTimeMillis()}.bin",
+            )
+        val failingSelectedUri = requireNotNull(failingPickerResult.uri)
+        assertEquals(Activity.RESULT_OK, failingPickerResult.resultCode)
+        assertEquals(DRIVE_AUTHORITY, failingSelectedUri.authority)
+
+        val selectedUriWriteResult =
+            writeToProvider(targetContext, failingSelectedUri, sourceBytes) { providerStream ->
+                FailAfterBytesOutputStream(providerStream, FAIL_AFTER_BYTES)
+            }
+        assertTrue(
+            "A mid-stream error for a selected Drive URI must not be treated as complete",
+            selectedUriWriteResult is ProviderWriteResult.Failed,
+        )
+        val selectedUriWriteError = (selectedUriWriteResult as ProviderWriteResult.Failed).error
+        assertEquals(IOException::class.java, selectedUriWriteError::class.java)
+        assertEquals(MID_STREAM_FAILURE_MESSAGE, selectedUriWriteError.message)
+
+        val incompleteReadBack = readWithRetry(targetContext, failingSelectedUri)
+        assertEquals(FAIL_AFTER_BYTES, incompleteReadBack.size)
+        assertFalse(
+            "A selected Drive URI containing only a prefix must not satisfy completion",
+            sourceBytes.contentEquals(incompleteReadBack),
+        )
 
         artifactFile(targetContext).writeText(
             buildString {
@@ -77,7 +105,10 @@ class SafGoogleDriveSpikeTest {
                 appendLine("read_back_bytes=${readBack.size}")
                 appendLine("read_back_sha256=${sha256(readBack)}")
                 appendLine("picker_cancel_result=${cancelledResult.resultCode}")
-                appendLine("invalid_drive_document_write_error=${providerWriteError!!::class.java.name}")
+                appendLine("ungranted_drive_document_write_error=${ungrantedUriError::class.java.name}")
+                appendLine("selected_drive_write_error=${selectedUriWriteError::class.java.name}")
+                appendLine("selected_drive_incomplete_bytes=${incompleteReadBack.size}")
+                appendLine("selected_drive_write_complete=false")
             },
         )
     }
@@ -118,6 +149,16 @@ class SafGoogleDriveSpikeTest {
             resourceId = "com.google.android.documentsui:id/breadcrumb_text",
         )
         clickWhenReady(instrumentation, resourceId = "android:id/button1")
+    }
+
+    private fun createDriveDocument(
+        instrumentation: Instrumentation,
+        context: Context,
+        fileName: String,
+    ): SafPickerSpikeActivity.PickerResult {
+        launchPicker(context, fileName)
+        selectDriveAndSave(instrumentation)
+        return requireNotNull(SafPickerSpikeActivity.awaitResult(PICKER_TIMEOUT_SECONDS))
     }
 
     private fun cancelPicker(instrumentation: Instrumentation): SafPickerSpikeActivity.PickerResult {
@@ -222,17 +263,71 @@ class SafGoogleDriveSpikeTest {
         throw AssertionError("Drive provider did not expose the completed document", lastFailure)
     }
 
-    private fun captureInvalidDriveDocumentWriteError(context: Context): Throwable? {
+    private fun assertUngrantedDriveDocumentIsRejected(context: Context): SecurityException {
         val invalidDriveDocument =
             DocumentsContract.buildDocumentUri(
                 DRIVE_AUTHORITY,
                 "pagebinder-invalid-${System.currentTimeMillis()}",
             )
-        return runCatching {
+        return assertThrows(SecurityException::class.java) {
             context.contentResolver.openOutputStream(invalidDriveDocument, "w").use { output ->
                 requireNotNull(output).write(1)
             }
-        }.exceptionOrNull()
+        }
+    }
+
+    private fun writeToProvider(
+        context: Context,
+        uri: Uri,
+        bytes: ByteArray,
+        decorate: (OutputStream) -> OutputStream = { it },
+    ): ProviderWriteResult =
+        try {
+            val providerStream =
+                context.contentResolver.openOutputStream(uri, "w")
+                    ?: throw FileNotFoundException("Provider returned no output stream")
+            decorate(providerStream).use { output -> output.write(bytes) }
+            ProviderWriteResult.Completed
+        } catch (error: IOException) {
+            ProviderWriteResult.Failed(error)
+        }
+
+    private sealed interface ProviderWriteResult {
+        data object Completed : ProviderWriteResult
+
+        data class Failed(
+            val error: IOException,
+        ) : ProviderWriteResult
+    }
+
+    private class FailAfterBytesOutputStream(
+        private val delegate: OutputStream,
+        private val byteLimit: Int,
+    ) : OutputStream() {
+        private var writtenBytes = 0
+
+        override fun write(value: Int) {
+            if (writtenBytes >= byteLimit) throw IOException(MID_STREAM_FAILURE_MESSAGE)
+            delegate.write(value)
+            writtenBytes++
+        }
+
+        override fun write(
+            bytes: ByteArray,
+            offset: Int,
+            length: Int,
+        ) {
+            val writableBytes = minOf(length, byteLimit - writtenBytes)
+            if (writableBytes > 0) {
+                delegate.write(bytes, offset, writableBytes)
+                writtenBytes += writableBytes
+            }
+            if (writableBytes < length) throw IOException(MID_STREAM_FAILURE_MESSAGE)
+        }
+
+        override fun flush() = delegate.flush()
+
+        override fun close() = delegate.close()
     }
 
     private fun artifactFile(context: Context): File {
@@ -264,5 +359,7 @@ class SafGoogleDriveSpikeTest {
         private const val UI_CLICK_ATTEMPTS = 5
         private const val PROVIDER_READ_ATTEMPTS = 8
         private const val PROVIDER_RETRY_MILLIS = 500L
+        private const val FAIL_AFTER_BYTES = 8 * 1024
+        private const val MID_STREAM_FAILURE_MESSAGE = "controlled selected-Drive write failure"
     }
 }
