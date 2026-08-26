@@ -15,4 +15,11 @@
     <string name="consent_decline">同意しない</string>
     <string name="consent_decline_notice">同意しない場合、PageBinder の機能はご利用いただけません。</string>
     <string name="consent_save_failed">同意を保存できませんでした。もう一度お試しください。</string>
+
+    <!-- 書き出し時の権限確認（docs/design/11-export.md / docs/specs/12-legal-guardrails.md §3.2）
+         export_consent_confirm は specs §4 の確定文言。言い換えない -->
+    <string name="export_consent_title">利用上の注意</string>
+    <string name="export_consent_description">書き出した成果物の取り扱いは利用者の責任で確認してください</string>
+    <string name="export_consent_confirm">この成果物を利用する権限を確認しました</string>
+    <string name="export_consent_required">書き出すには、上の確認にチェックしてください</string>
 </resources>
