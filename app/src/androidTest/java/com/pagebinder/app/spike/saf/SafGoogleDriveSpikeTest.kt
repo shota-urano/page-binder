@@ -23,6 +23,7 @@ import java.io.IOException
 import java.io.OutputStream
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 @RunWith(AndroidJUnit4::class)
 class SafGoogleDriveSpikeTest {
@@ -54,8 +55,11 @@ class SafGoogleDriveSpikeTest {
         assertEquals(sourceBytes.size, readBack.size)
         assertEquals(sourceSha256, sha256(readBack))
 
-        launchPicker(targetContext, "pagebinder-saf-cancel-${System.currentTimeMillis()}.bin")
-        waitForNode(instrumentation, description = SHOW_ROOTS_DESCRIPTION)
+        openPickerRootsWithRetry(
+            instrumentation,
+            targetContext,
+            "pagebinder-saf-cancel-${System.currentTimeMillis()}.bin",
+        )
         val cancelledResult = cancelPicker(instrumentation)
         assertEquals(Activity.RESULT_CANCELED, cancelledResult.resultCode)
         assertNull(cancelledResult.uri)
@@ -135,7 +139,6 @@ class SafGoogleDriveSpikeTest {
     }
 
     private fun selectDriveAndSave(instrumentation: Instrumentation) {
-        clickWhenReady(instrumentation, description = SHOW_ROOTS_DESCRIPTION)
         clickWhenReady(instrumentation, text = DRIVE_ROOT_LABEL, resourceId = "android:id/title")
         waitForNode(
             instrumentation,
@@ -148,7 +151,12 @@ class SafGoogleDriveSpikeTest {
             text = MY_DRIVE_LABEL,
             resourceId = "com.google.android.documentsui:id/breadcrumb_text",
         )
-        clickWhenReady(instrumentation, resourceId = "android:id/button1")
+        // awaitResult synchronizes this transition; an additional idle wait can outlive the temporary URI grant.
+        clickWhenReady(
+            instrumentation,
+            resourceId = "android:id/button1",
+            waitForIdleAfterClick = false,
+        )
     }
 
     private fun createDriveDocument(
@@ -156,9 +164,31 @@ class SafGoogleDriveSpikeTest {
         context: Context,
         fileName: String,
     ): SafPickerSpikeActivity.PickerResult {
-        launchPicker(context, fileName)
+        openPickerRootsWithRetry(instrumentation, context, fileName)
         selectDriveAndSave(instrumentation)
         return requireNotNull(SafPickerSpikeActivity.awaitResult(PICKER_TIMEOUT_SECONDS))
+    }
+
+    private fun openPickerRootsWithRetry(
+        instrumentation: Instrumentation,
+        context: Context,
+        fileName: String,
+    ) {
+        var firstFailure: AssertionError? = null
+        repeat(PICKER_LAUNCH_ATTEMPTS) { attempt ->
+            launchPicker(context, fileName)
+            try {
+                clickWhenReady(instrumentation, description = SHOW_ROOTS_DESCRIPTION)
+                return
+            } catch (failure: AssertionError) {
+                if (attempt == PICKER_LAUNCH_ATTEMPTS - 1) {
+                    firstFailure?.let(failure::addSuppressed)
+                    throw failure
+                }
+                firstFailure = failure
+                cancelPicker(instrumentation)
+            }
+        }
     }
 
     private fun cancelPicker(instrumentation: Instrumentation): SafPickerSpikeActivity.PickerResult {
@@ -167,9 +197,28 @@ class SafGoogleDriveSpikeTest {
                 "SAF picker did not handle the Back action",
                 instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK),
             )
-            SafPickerSpikeActivity.awaitResult(CANCEL_RESULT_POLL_SECONDS)?.let { return it }
+            SafPickerSpikeActivity.awaitResult(CANCEL_RESULT_POLL_SECONDS)?.let { result ->
+                waitForPickerDismissed(instrumentation)
+                return result
+            }
         }
         throw AssertionError("SAF picker did not return a cancelled result")
+    }
+
+    private fun waitForPickerDismissed(instrumentation: Instrumentation) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(UI_TIMEOUT_SECONDS)
+        do {
+            waitForPickerIdle(instrumentation)
+            val activePackage = instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString()
+            if (activePackage != null && activePackage != DOCUMENTS_UI_PACKAGE) {
+                Thread.sleep(PICKER_DISMISS_STABILITY_MILLIS)
+                waitForPickerIdle(instrumentation)
+                val stablePackage = instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString()
+                if (stablePackage != null && stablePackage != DOCUMENTS_UI_PACKAGE) return
+            }
+            Thread.sleep(UI_POLL_MILLIS)
+        } while (System.nanoTime() < deadline)
+        throw AssertionError("Timed out waiting for SAF picker dismissal")
     }
 
     private fun waitForNode(
@@ -178,9 +227,10 @@ class SafGoogleDriveSpikeTest {
         textPrefix: String? = null,
         description: String? = null,
         resourceId: String? = null,
+        deadlineNanos: Long = System.nanoTime() + TimeUnit.SECONDS.toNanos(UI_TIMEOUT_SECONDS),
     ): AccessibilityNodeInfo {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(UI_TIMEOUT_SECONDS)
         do {
+            waitForPickerIdle(instrumentation)
             val root = instrumentation.uiAutomation.rootInActiveWindow
             val matches =
                 when {
@@ -204,8 +254,11 @@ class SafGoogleDriveSpikeTest {
                         (description == null || it.contentDescription?.toString() == description)
                 }?.let { return it }
             Thread.sleep(UI_POLL_MILLIS)
-        } while (System.nanoTime() < deadline)
-        throw AssertionError("Timed out waiting for SAF picker node")
+        } while (System.nanoTime() < deadlineNanos)
+        throw AssertionError(
+            "Timed out waiting for SAF picker node " +
+                "(text=$text, textPrefix=$textPrefix, description=$description, resourceId=$resourceId)",
+        )
     }
 
     private fun clickWhenReady(
@@ -213,14 +266,35 @@ class SafGoogleDriveSpikeTest {
         text: String? = null,
         description: String? = null,
         resourceId: String? = null,
+        waitForIdleAfterClick: Boolean = true,
     ) {
-        repeat(UI_CLICK_ATTEMPTS) {
-            if (click(waitForNode(instrumentation, text = text, description = description, resourceId = resourceId))) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(UI_TIMEOUT_SECONDS)
+        do {
+            if (
+                click(
+                    waitForNode(
+                        instrumentation,
+                        text = text,
+                        description = description,
+                        resourceId = resourceId,
+                        deadlineNanos = deadline,
+                    ),
+                )
+            ) {
+                if (waitForIdleAfterClick) waitForPickerIdle(instrumentation)
                 return
             }
             Thread.sleep(UI_POLL_MILLIS)
-        }
+        } while (System.nanoTime() < deadline)
         throw AssertionError("SAF picker node was not clickable")
+    }
+
+    private fun waitForPickerIdle(instrumentation: Instrumentation) {
+        try {
+            instrumentation.uiAutomation.waitForIdle(UI_IDLE_MILLIS, UI_IDLE_TIMEOUT_MILLIS)
+        } catch (_: TimeoutException) {
+            // A busy provider may never become fully idle; node polling remains the source of truth.
+        }
     }
 
     private fun click(node: AccessibilityNodeInfo): Boolean {
@@ -344,6 +418,7 @@ class SafGoogleDriveSpikeTest {
     companion object {
         private const val DRIVE_PACKAGE = "com.google.android.apps.docs"
         private const val DRIVE_AUTHORITY = "com.google.android.apps.docs.storage"
+        private const val DOCUMENTS_UI_PACKAGE = "com.google.android.documentsui"
         private const val DRIVE_ROOT_LABEL = "Drive"
         private const val DRIVE_HEADER_PREFIX = "Files from Drive"
         private const val MY_DRIVE_LABEL = "My Drive"
@@ -352,11 +427,14 @@ class SafGoogleDriveSpikeTest {
         private const val TEMP_EXPORT_NAME = "gph-1-completed-export.tmp"
         private const val METRICS_FILE = "gph-1-saf-drive-metrics.txt"
         private const val PICKER_TIMEOUT_SECONDS = 30L
+        private const val PICKER_LAUNCH_ATTEMPTS = 2
         private const val CANCEL_RESULT_POLL_SECONDS = 2L
         private const val MAX_CANCEL_BACK_PRESSES = 3
-        private const val UI_TIMEOUT_SECONDS = 20L
+        private const val UI_TIMEOUT_SECONDS = 60L
+        private const val UI_IDLE_MILLIS = 500L
+        private const val UI_IDLE_TIMEOUT_MILLIS = 3_000L
         private const val UI_POLL_MILLIS = 250L
-        private const val UI_CLICK_ATTEMPTS = 5
+        private const val PICKER_DISMISS_STABILITY_MILLIS = 500L
         private const val PROVIDER_READ_ATTEMPTS = 8
         private const val PROVIDER_RETRY_MILLIS = 500L
         private const val FAIL_AFTER_BYTES = 8 * 1024
