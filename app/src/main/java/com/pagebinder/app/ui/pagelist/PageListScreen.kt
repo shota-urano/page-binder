@@ -240,6 +240,7 @@ private fun PageDeleteConfirmDialog(
         confirmButton = {
             Button(
                 onClick = onConfirm,
+                modifier = Modifier.heightIn(min = MinTouchTarget),
                 shape = RoundedCornerShape(ButtonCornerRadius),
                 colors =
                     ButtonDefaults.buttonColors(
@@ -256,6 +257,7 @@ private fun PageDeleteConfirmDialog(
         dismissButton = {
             OutlinedButton(
                 onClick = onDismiss,
+                modifier = Modifier.heightIn(min = MinTouchTarget),
                 shape = RoundedCornerShape(ButtonCornerRadius),
                 border = BorderStroke(HAIRLINE_BORDER_WIDTH, ColorPrimary),
                 colors =
