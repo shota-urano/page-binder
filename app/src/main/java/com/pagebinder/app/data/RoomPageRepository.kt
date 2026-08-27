@@ -1,12 +1,8 @@
 package com.pagebinder.app.data
 
-import androidx.room.ColumnInfo
 import androidx.room.Dao
-import androidx.room.Entity
-import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
-import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Transaction
 import com.pagebinder.app.domain.Page
@@ -18,41 +14,6 @@ import com.pagebinder.app.domain.PageRepositoryException
 import com.pagebinder.app.domain.VALID_PAGE_ROTATIONS
 import java.time.Instant
 import java.util.UUID
-
-@Entity(
-    tableName = "pages",
-    indices = [Index(value = ["project_id", "sequence"], unique = true)],
-)
-data class PageEntity(
-    @PrimaryKey
-    val id: String,
-    @ColumnInfo(name = "project_id")
-    val projectId: String,
-    val sequence: Int,
-    @ColumnInfo(name = "original_image_path")
-    val originalImagePath: String,
-    val width: Int,
-    val height: Int,
-    val rotation: Int,
-    @ColumnInfo(name = "crop_left")
-    val cropLeft: Float,
-    @ColumnInfo(name = "crop_top")
-    val cropTop: Float,
-    @ColumnInfo(name = "crop_right")
-    val cropRight: Float,
-    @ColumnInfo(name = "crop_bottom")
-    val cropBottom: Float,
-    @ColumnInfo(name = "captured_at")
-    val capturedAt: String,
-    @ColumnInfo(name = "content_hash")
-    val contentHash: String,
-    @ColumnInfo(name = "perceptual_hash")
-    val perceptualHash: String,
-    @ColumnInfo(name = "quality_state")
-    val qualityState: String,
-    @ColumnInfo(name = "ocr_state")
-    val ocrState: String,
-)
 
 @Dao
 abstract class PageDao {
