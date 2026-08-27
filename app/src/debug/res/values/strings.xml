@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- debug ビルドだけに入るプレビュー入口のラベル -->
+    <string name="export_preview_label">PageBinder 書き出しプレビュー</string>
+</resources>
