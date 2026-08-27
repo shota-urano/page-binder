@@ -21,6 +21,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
+import java.util.zip.CRC32
+import java.util.zip.DeflaterOutputStream
 
 @RunWith(AndroidJUnit4::class)
 class MlKitOcrGatewayTest {
@@ -74,6 +77,25 @@ class MlKitOcrGatewayTest {
         try {
             assertEquals(2048, prepared.bitmap.width)
             assertEquals(683, prepared.bitmap.height)
+        } finally {
+            prepared.bitmap.recycle()
+        }
+    }
+
+    @Test
+    fun smallCropOfLargeImageKeepsCropResolutionBeforeOcrShrink() {
+        val encoded = solidGrayscalePng(width = 8192, height = 8192)
+
+        val prepared =
+            OcrImagePreprocessor.prepare(
+                OcrInput(
+                    image = OcrImageSource { ByteArrayInputStream(encoded) },
+                    crop = OcrCrop(left = 0.45f, top = 0.45f, right = 0.55f, bottom = 0.55f),
+                ),
+            )
+        try {
+            assertEquals(820, prepared.bitmap.width)
+            assertEquals(820, prepared.bitmap.height)
         } finally {
             prepared.bitmap.recycle()
         }
@@ -151,9 +173,58 @@ class MlKitOcrGatewayTest {
             output.toByteArray()
         }
 
+    private fun solidGrayscalePng(
+        width: Int,
+        height: Int,
+    ): ByteArray {
+        val compressed =
+            ByteArrayOutputStream().also { bytes ->
+                DeflaterOutputStream(bytes).use { deflater ->
+                    val row = ByteArray(width + 1) { 0xff.toByte() }.apply { this[0] = 0 }
+                    repeat(height) { deflater.write(row) }
+                }
+            }.toByteArray()
+        return ByteArrayOutputStream().use { bytes ->
+            DataOutputStream(bytes).use { output ->
+                output.write(PNG_SIGNATURE)
+                output.writePngChunk(
+                    "IHDR",
+                    ByteArrayOutputStream().use { headerBytes ->
+                        DataOutputStream(headerBytes).use { header ->
+                            header.writeInt(width)
+                            header.writeInt(height)
+                            header.write(byteArrayOf(8, 0, 0, 0, 0))
+                        }
+                        headerBytes.toByteArray()
+                    },
+                )
+                output.writePngChunk("IDAT", compressed)
+                output.writePngChunk("IEND", ByteArray(0))
+            }
+            bytes.toByteArray()
+        }
+    }
+
+    private fun DataOutputStream.writePngChunk(
+        type: String,
+        data: ByteArray,
+    ) {
+        val typeBytes = type.toByteArray(Charsets.US_ASCII)
+        writeInt(data.size)
+        write(typeBytes)
+        write(data)
+        val crc =
+            CRC32().apply {
+                update(typeBytes)
+                update(data)
+            }
+        writeInt(crc.value.toInt())
+    }
+
     private companion object {
         const val WIDTH = 1200
         const val HEIGHT = 1800
         const val FONT_ASSET = "fonts/NotoSansJP-wght.ttf"
+        val PNG_SIGNATURE = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
     }
 }
