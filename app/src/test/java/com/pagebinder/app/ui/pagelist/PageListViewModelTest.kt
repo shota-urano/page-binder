@@ -14,6 +14,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -221,6 +222,236 @@ class PageListViewModelTest {
             assertTrue(viewModel.uiState.value.isSelected(pages[1].id))
         }
 
+    // ---- 削除確認（docs/specs/08-page-editing.md §6・§9 の受け入れ基準「確認ダイアログに選択件数」） ----
+
+    @Test
+    fun `削除確認ダイアログに選択件数が表示される`() =
+        runTest {
+            val pages = samplePages()
+            val viewModel = createViewModel(pages)
+            viewModel.onPageLongPressed(pages[0].id)
+            viewModel.onSelectionToggled(pages[2].id)
+            viewModel.onSelectionToggled(pages[4].id)
+
+            viewModel.onDeleteSelectedRequested()
+
+            assertEquals(3, viewModel.uiState.value.deleteConfirmation?.pageCount)
+            assertEquals(3, viewModel.uiState.value.selectedCount)
+        }
+
+    @Test
+    fun `選択が無ければ削除確認は出ない`() =
+        runTest {
+            val viewModel = createViewModel(pages = samplePages())
+
+            viewModel.onDeleteSelectedRequested()
+
+            assertNull(viewModel.uiState.value.deleteConfirmation)
+        }
+
+    @Test
+    fun `確認をキャンセルしても選択とページは変わらない`() =
+        runTest {
+            val pages = samplePages()
+            val repository = FakePageRepository(pages)
+            val viewModel = PageListViewModel(projectId, repository)
+            viewModel.onPageLongPressed(pages[0].id)
+            viewModel.onDeleteSelectedRequested()
+
+            viewModel.onDeleteDismissed()
+
+            assertNull(viewModel.uiState.value.deleteConfirmation)
+            assertEquals(1, viewModel.uiState.value.selectedCount)
+            assertEquals(5, viewModel.uiState.value.pages.size)
+            assertTrue(repository.deleteCalls.isEmpty())
+        }
+
+    @Test
+    fun `削除を確定すると選択したページが消えて取り消しを案内する`() =
+        runTest {
+            val pages = samplePages()
+            val repository = FakePageRepository(pages)
+            val viewModel = PageListViewModel(projectId, repository)
+            viewModel.onPageLongPressed(pages[1].id)
+            viewModel.onSelectionToggled(pages[3].id)
+            viewModel.onDeleteSelectedRequested()
+
+            viewModel.onDeleteConfirmed()
+
+            val uiState = viewModel.uiState.value
+            assertEquals(listOf(setOf(pages[1].id, pages[3].id)), repository.deleteCalls)
+            assertNull(uiState.deleteConfirmation)
+            assertFalse(uiState.selectionMode)
+            assertEquals(listOf(1, 2, 3), uiState.pages.map(PageListItemUiState::sequence))
+            assertEquals(PageListUndoableEdit.Delete(pageCount = 2), uiState.undoableEdit)
+            assertNull(uiState.operationError)
+        }
+
+    @Test
+    fun `削除に失敗しても一覧は消えずエラーを出す`() =
+        runTest {
+            val pages = samplePages()
+            val repository = FakePageRepository(pages, failDelete = true)
+            val viewModel = PageListViewModel(projectId, repository)
+            viewModel.onPageLongPressed(pages[0].id)
+            viewModel.onDeleteSelectedRequested()
+
+            viewModel.onDeleteConfirmed()
+
+            val uiState = viewModel.uiState.value
+            assertEquals(PageListOperationError.DELETE, uiState.operationError)
+            assertEquals(5, uiState.pages.size)
+            assertNull(uiState.undoableEdit)
+            assertFalse(uiState.deleting)
+        }
+
+    // ---- ドラッグ並べ替え（docs/specs/08-page-editing.md §3.2 FR-EDT-002） ----
+
+    @Test
+    fun `ドラッグ中の入れ替えは連番を振り直し指を離すと永続化する`() =
+        runTest {
+            val pages = samplePages()
+            val repository = FakePageRepository(pages)
+            val viewModel = PageListViewModel(projectId, repository)
+
+            viewModel.onPageMoved(fromIndex = 0, toIndex = 2)
+
+            val duringDrag = viewModel.uiState.value
+            assertEquals(
+                listOf(pages[1].id, pages[2].id, pages[0].id, pages[3].id, pages[4].id),
+                duringDrag.pages.map(PageListItemUiState::pageId),
+            )
+            assertEquals(listOf(1, 2, 3, 4, 5), duringDrag.pages.map(PageListItemUiState::sequence))
+            assertTrue(repository.reorderCalls.isEmpty())
+
+            viewModel.onReorderFinished()
+
+            assertEquals(
+                listOf(listOf(pages[1].id, pages[2].id, pages[0].id, pages[3].id, pages[4].id)),
+                repository.reorderCalls,
+            )
+            val afterDrop = viewModel.uiState.value
+            assertEquals(
+                listOf(pages[1].id, pages[2].id, pages[0].id, pages[3].id, pages[4].id),
+                afterDrop.pages.map(PageListItemUiState::pageId),
+            )
+            assertEquals(PageListUndoableEdit.Reorder, afterDrop.undoableEdit)
+        }
+
+    @Test
+    fun `動かしていなければ指を離しても保存しない`() =
+        runTest {
+            val repository = FakePageRepository(samplePages())
+            val viewModel = PageListViewModel(projectId, repository)
+
+            viewModel.onReorderFinished()
+
+            assertTrue(repository.reorderCalls.isEmpty())
+            assertNull(viewModel.uiState.value.undoableEdit)
+        }
+
+    @Test
+    fun `並べ替えに失敗すると保存済みの順序へ戻してエラーを出す`() =
+        runTest {
+            val pages = samplePages()
+            val repository = FakePageRepository(pages, failReorder = true)
+            val viewModel = PageListViewModel(projectId, repository)
+            viewModel.onPageMoved(fromIndex = 0, toIndex = 4)
+
+            viewModel.onReorderFinished()
+
+            val uiState = viewModel.uiState.value
+            assertEquals(PageListOperationError.REORDER, uiState.operationError)
+            assertEquals(pages.map(Page::id), uiState.pages.map(PageListItemUiState::pageId))
+            assertNull(uiState.undoableEdit)
+        }
+
+    @Test
+    fun `絞り込み中と選択中は並べ替えを受け付けない`() =
+        runTest {
+            val pages = samplePages()
+            val repository = FakePageRepository(pages)
+            val viewModel = PageListViewModel(projectId, repository)
+
+            viewModel.onFilterChange(PageListFilter.OCR_INCOMPLETE)
+            assertFalse(viewModel.uiState.value.reorderEnabled)
+            viewModel.onPageMoved(fromIndex = 0, toIndex = 1)
+            viewModel.onReorderFinished()
+
+            viewModel.onFilterChange(PageListFilter.ALL)
+            viewModel.onPageLongPressed(pages[0].id)
+            assertFalse(viewModel.uiState.value.reorderEnabled)
+            viewModel.onPageMoved(fromIndex = 0, toIndex = 1)
+            viewModel.onReorderFinished()
+
+            assertTrue(repository.reorderCalls.isEmpty())
+            assertEquals(pages.map(Page::id), viewModel.uiState.value.pages.map(PageListItemUiState::pageId))
+        }
+
+    // ---- 取り消し（docs/specs/08-page-editing.md §3.4。直前1操作） ----
+
+    @Test
+    fun `削除の取り消しでページが戻り案内が消える`() =
+        runTest {
+            val pages = samplePages()
+            val repository = FakePageRepository(pages)
+            val viewModel = PageListViewModel(projectId, repository)
+            viewModel.onPageLongPressed(pages[0].id)
+            viewModel.onDeleteSelectedRequested()
+            viewModel.onDeleteConfirmed()
+            assertEquals(4, viewModel.uiState.value.pages.size)
+
+            viewModel.onUndoRequested()
+
+            val uiState = viewModel.uiState.value
+            assertEquals(1, repository.undoCalls)
+            assertEquals(pages.map(Page::id), uiState.pages.map(PageListItemUiState::pageId))
+            assertNull(uiState.undoableEdit)
+            assertNull(uiState.operationError)
+        }
+
+    @Test
+    fun `取り消せる操作が無ければ取り消しを呼ばない`() =
+        runTest {
+            val repository = FakePageRepository(samplePages())
+            val viewModel = PageListViewModel(projectId, repository)
+
+            viewModel.onUndoRequested()
+
+            assertEquals(0, repository.undoCalls)
+        }
+
+    @Test
+    fun `取り消しに失敗するとエラーを出す`() =
+        runTest {
+            val pages = samplePages()
+            val repository = FakePageRepository(pages, failUndo = true)
+            val viewModel = PageListViewModel(projectId, repository)
+            viewModel.onPageLongPressed(pages[0].id)
+            viewModel.onDeleteSelectedRequested()
+            viewModel.onDeleteConfirmed()
+
+            viewModel.onUndoRequested()
+
+            assertEquals(PageListOperationError.UNDO, viewModel.uiState.value.operationError)
+            assertNull(viewModel.uiState.value.undoableEdit)
+        }
+
+    @Test
+    fun `案内を閉じると取り消しもエラーも消える`() =
+        runTest {
+            val pages = samplePages()
+            val viewModel = createViewModel(pages)
+            viewModel.onPageLongPressed(pages[0].id)
+            viewModel.onDeleteSelectedRequested()
+            viewModel.onDeleteConfirmed()
+
+            viewModel.onMessageDismissed()
+
+            assertNull(viewModel.uiState.value.undoableEdit)
+            assertNull(viewModel.uiState.value.operationError)
+        }
+
     private fun createViewModel(pages: List<Page>) = PageListViewModel(projectId, FakePageRepository(pages))
 
     /** 各状態が1件ずつ出るようにしたサンプル。1=完了/2=待機/3=失敗/4=重複/5=黒画面 */
@@ -254,11 +485,24 @@ class PageListViewModelTest {
             ocrState = ocrState,
         )
 
-    /** 一覧が読むのは findByProject だけ。書き込み系はこの画面から呼ばない */
+    /**
+     * 一覧が使うのは読み出しと編集系（並べ替え・削除・取り消し）だけ。
+     * 実際に並びを書き換えるので、操作後の読み直しが何を返すかまで確かめられる。
+     */
     private class FakePageRepository(
         var pages: List<Page>,
         private var failNextReads: Int = 0,
+        private val failReorder: Boolean = false,
+        private val failDelete: Boolean = false,
+        private val failUndo: Boolean = false,
     ) : PageRepository {
+        val reorderCalls = mutableListOf<List<UUID>>()
+        val deleteCalls = mutableListOf<Set<UUID>>()
+        var undoCalls = 0
+            private set
+
+        private var undoSnapshot: List<Page>? = null
+
         override suspend fun insert(page: Page) = throw UnsupportedOperationException()
 
         override suspend fun findById(id: UUID): Page? = pages.firstOrNull { it.id == id }
@@ -274,12 +518,26 @@ class PageListViewModelTest {
         override suspend fun reorder(
             projectId: UUID,
             orderedPageIds: List<UUID>,
-        ) = throw UnsupportedOperationException()
+        ) {
+            reorderCalls += orderedPageIds
+            if (failReorder) throw IOException("reorder failed")
+            val byId = pages.associateBy(Page::id)
+            undoSnapshot = pages
+            pages = orderedPageIds.mapIndexedNotNull { index, id -> byId[id]?.copy(sequence = index + 1) }
+        }
 
         override suspend fun delete(
             projectId: UUID,
             pageIds: Set<UUID>,
-        ) = throw UnsupportedOperationException()
+        ) {
+            deleteCalls += pageIds
+            if (failDelete) throw IOException("delete failed")
+            undoSnapshot = pages
+            pages =
+                pages
+                    .filterNot { it.id in pageIds }
+                    .mapIndexed { index, page -> page.copy(sequence = index + 1) }
+        }
 
         override suspend fun updateRotation(
             pageId: UUID,
@@ -291,7 +549,14 @@ class PageListViewModelTest {
             crop: PageCrop,
         ) = throw UnsupportedOperationException()
 
-        override suspend fun undoLastEdit(): Boolean = throw UnsupportedOperationException()
+        override suspend fun undoLastEdit(): Boolean {
+            undoCalls++
+            if (failUndo) throw IOException("undo failed")
+            val snapshot = undoSnapshot ?: return false
+            pages = snapshot
+            undoSnapshot = null
+            return true
+        }
     }
 
     private companion object {
