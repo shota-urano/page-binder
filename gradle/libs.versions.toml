@@ -13,6 +13,7 @@ androidxTestRunner = "1.6.2"
 ktlint = "12.1.2"
 pdfboxAndroid = "2.0.27.0"
 room = "2.7.1"
+mlKitTextRecognitionJapanese = "16.0.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -33,6 +34,7 @@ androidx-test-runner = { group = "androidx.test", name = "runner", version.ref =
 pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfboxAndroid" }
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+mlkit-text-recognition-japanese = { group = "com.google.mlkit", name = "text-recognition-japanese", version.ref = "mlKitTextRecognitionJapanese" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
