@@ -56,8 +56,13 @@ data class PageEntity(
 
 @Dao
 abstract class PageDao {
+    private var lastUndoAction: PageUndoAction? = null
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     abstract suspend fun insert(page: PageEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    protected abstract suspend fun insertAll(pages: List<PageEntity>)
 
     @Query("SELECT * FROM pages WHERE id = :id")
     abstract suspend fun findById(id: String): PageEntity?
@@ -99,6 +104,33 @@ abstract class PageDao {
         bottom: Float,
     ): Int
 
+    @Query("UPDATE pages SET rotation = :rotation, ocr_state = :ocrState WHERE id = :id")
+    protected abstract suspend fun restoreRotation(
+        id: String,
+        rotation: Int,
+        ocrState: String,
+    ): Int
+
+    @Query(
+        """
+        UPDATE pages
+        SET crop_left = :left,
+            crop_top = :top,
+            crop_right = :right,
+            crop_bottom = :bottom,
+            ocr_state = :ocrState
+        WHERE id = :id
+        """,
+    )
+    protected abstract suspend fun restoreCrop(
+        id: String,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+        ocrState: String,
+    ): Int
+
     @Transaction
     open suspend fun reorderProject(
         projectId: String,
@@ -108,7 +140,9 @@ abstract class PageDao {
         if (orderedPageIds.size != currentIds.size || orderedPageIds.toSet() != currentIds.toSet()) {
             throw PageRepositoryException.InvalidProjectOrder()
         }
+        if (orderedPageIds == currentIds) return
         rewriteSequences(orderedPageIds)
+        lastUndoAction = PageUndoAction.Reorder(currentIds)
     }
 
     @Transaction
@@ -121,8 +155,10 @@ abstract class PageDao {
         if (!currentIds.containsAll(pageIds)) {
             throw PageRepositoryException.PagesNotInProject()
         }
+        val deletedPages = findByProject(projectId).filter { it.id in pageIds }
         check(deleteByIds(pageIds.toList()) == pageIds.size) { "Page delete did not affect every selected row" }
         rewriteSequences(currentIds.filterNot(pageIds::contains))
+        lastUndoAction = PageUndoAction.Delete(projectId, currentIds, deletedPages)
     }
 
     @Transaction
@@ -133,6 +169,7 @@ abstract class PageDao {
         val page = findById(pageId) ?: throw PageRepositoryException.PageNotFound(UUID.fromString(pageId))
         if (page.rotation == rotation) return
         check(updateRotationAndMarkStale(pageId, rotation) == 1) { "Page rotation update did not affect one row" }
+        lastUndoAction = PageUndoAction.Rotation(pageId, page.rotation, page.ocrState)
     }
 
     @Transaction
@@ -158,15 +195,65 @@ abstract class PageDao {
                 bottom = crop.bottom,
             ) == 1,
         ) { "Page crop update did not affect one row" }
+        lastUndoAction =
+            PageUndoAction.Crop(
+                pageId = pageId,
+                left = page.cropLeft,
+                top = page.cropTop,
+                right = page.cropRight,
+                bottom = page.cropBottom,
+                ocrState = page.ocrState,
+            )
+    }
+
+    @Transaction
+    open suspend fun undoLastEdit(): Boolean {
+        val action = lastUndoAction ?: return false
+        when (action) {
+            is PageUndoAction.Reorder -> rewriteSequences(action.orderedPageIds)
+            is PageUndoAction.Delete -> {
+                val remainingIds = findByProject(action.projectId).map(PageEntity::id)
+                stageSequences(remainingIds)
+                insertAll(action.deletedPages)
+                assignFinalSequences(action.orderedPageIds)
+            }
+            is PageUndoAction.Rotation -> {
+                check(restoreRotation(action.pageId, action.rotation, action.ocrState) == 1) {
+                    "Page rotation restore did not affect one row"
+                }
+            }
+            is PageUndoAction.Crop -> {
+                check(
+                    restoreCrop(
+                        id = action.pageId,
+                        left = action.left,
+                        top = action.top,
+                        right = action.right,
+                        bottom = action.bottom,
+                        ocrState = action.ocrState,
+                    ) == 1,
+                ) { "Page crop restore did not affect one row" }
+            }
+        }
+        lastUndoAction = null
+        return true
     }
 
     private suspend fun rewriteSequences(orderedPageIds: List<String>) {
         // Temporary negative values avoid collisions with the unique (project, sequence) index.
-        orderedPageIds.forEachIndexed { index, id ->
-            check(updateSequence(id, -(index + 1)) == 1) { "Page sequence update did not affect one row" }
-        }
+        stageSequences(orderedPageIds)
+        assignFinalSequences(orderedPageIds)
+    }
+
+    private suspend fun assignFinalSequences(orderedPageIds: List<String>) {
         orderedPageIds.forEachIndexed { index, id ->
             check(updateSequence(id, index + 1) == 1) { "Page sequence update did not affect one row" }
+        }
+    }
+
+    private suspend fun stageSequences(orderedPageIds: List<String>) {
+        orderedPageIds.forEachIndexed { index, id ->
+            check(updateSequence(id, -(index + 1)) == 1) { "Page sequence update did not affect one row" }
         }
     }
 }
@@ -211,6 +298,35 @@ class RoomPageRepository(
     ) {
         dao.updateCrop(pageId.toString(), crop)
     }
+
+    override suspend fun undoLastEdit(): Boolean = dao.undoLastEdit()
+}
+
+private sealed interface PageUndoAction {
+    data class Reorder(
+        val orderedPageIds: List<String>,
+    ) : PageUndoAction
+
+    data class Delete(
+        val projectId: String,
+        val orderedPageIds: List<String>,
+        val deletedPages: List<PageEntity>,
+    ) : PageUndoAction
+
+    data class Rotation(
+        val pageId: String,
+        val rotation: Int,
+        val ocrState: String,
+    ) : PageUndoAction
+
+    data class Crop(
+        val pageId: String,
+        val left: Float,
+        val top: Float,
+        val right: Float,
+        val bottom: Float,
+        val ocrState: String,
+    ) : PageUndoAction
 }
 
 private fun Page.toEntity() =
