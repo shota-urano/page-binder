@@ -12,9 +12,9 @@ MODULE := app
 # 軽い検査（Stop hook 用）。ktlint/detekt どちらも未導入なら bootstrap が hooks 登録ごと見送る
 FAST_CHECKS := lint
 # フル検証。e2e（connectedAndroidTest）はエミュレータ起動が前提
-CHECKS := $(FAST_CHECKS) test android-lint build e2e
+CHECKS := $(FAST_CHECKS) test android-lint manifest-check build e2e
 
-.PHONY: verify verify-fast lint test android-lint build e2e run
+.PHONY: verify verify-fast lint test android-lint manifest-check build e2e run
 
 verify: $(CHECKS)
 	@test -n "$(strip $(CHECKS))" || { echo "VERIFY: FAIL (検証項目がゼロ)"; exit 1; }
@@ -36,6 +36,10 @@ test:
 # false のままだと検出しても exit 0 で素通りする false-pass）
 android-lint:
 	$(GRADLE) :$(MODULE):lintDebug
+
+# 依存ライブラリを含むマージ後 Manifest の禁止宣言を検査
+manifest-check:
+	$(GRADLE) :$(MODULE):verifyDebugMergedManifest
 
 build:
 	$(GRADLE) :$(MODULE):assembleDebug

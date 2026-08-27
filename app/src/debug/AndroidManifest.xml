@@ -5,6 +5,17 @@
         <activity
             android:name=".spike.saf.SafPickerSpikeActivity"
             android:exported="false" />
+        <!-- debug 専用の書き出し画面プレビュー（実機での目視・スクリーンショット用） -->
+        <activity
+            android:name=".preview.ExportScreenPreviewActivity"
+            android:exported="true"
+            android:label="@string/export_preview_label"
+            android:theme="@style/Theme.PageBinder">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
     </application>
 
 </manifest>

@@ -54,9 +54,10 @@ fun ExportConsentCard(
         shadowElevation = 1.dp,
     ) {
         Column(modifier = Modifier.padding(ScreenHorizontalMargin)) {
+            // カード見出しは「見出し 22sp」= headlineSmall（docs/design/system/01-tokens.md タイポグラフィ）
             Text(
                 text = stringResource(R.string.export_consent_title),
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(modifier = Modifier.height(SpaceUnit))
