@@ -1,0 +1,159 @@
+package com.pagebinder.app.ocr
+
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Typeface
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import com.pagebinder.app.domain.OcrCrop
+import com.pagebinder.app.domain.OcrImageSource
+import com.pagebinder.app.domain.OcrInput
+import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+
+@RunWith(AndroidJUnit4::class)
+class MlKitOcrGatewayTest {
+    private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private val typeface by lazy { Typeface.createFromAsset(context.assets, FONT_ASSET) }
+
+    @Test
+    fun fixtureProducesSchemaVersionOneBlocksInOriginalImageCoordinates() =
+        runBlocking {
+            val upright = fixtureBitmap()
+            val original = upright.rotate(270)
+            upright.recycle()
+            val encoded = original.toPng()
+            val originalWidth = original.width
+            val originalHeight = original.height
+            original.recycle()
+
+            val output =
+                MlKitOcrGateway().use { gateway ->
+                    gateway.recognize(
+                        OcrInput(
+                            image = OcrImageSource { ByteArrayInputStream(encoded) },
+                            rotationDegrees = 90,
+                            crop = OcrCrop(left = 0.05f, top = 0.05f, right = 0.95f, bottom = 0.95f),
+                        ),
+                    )
+                }
+
+            assertTrue(output.fullText.contains("PageBinder"))
+            assertEquals("mlkit-text-recognition-v2-japanese:16.0.1", output.engineVersion)
+            assertTrue(output.sourceImageHash.matches(Regex("[0-9a-f]{64}")))
+
+            val root = JSONObject(output.blocksJson)
+            assertEquals(1, root.getInt("schemaVersion"))
+            val blocks = root.getJSONArray("blocks")
+            assertFalse(blocks.length() == 0)
+            blocks.assertIndexedSchema(originalWidth, originalHeight)
+        }
+
+    @Test
+    fun highResolutionInputIsShrunkWithoutChangingAspectRatio() {
+        val source = Bitmap.createBitmap(3000, 1000, Bitmap.Config.ARGB_8888)
+        Canvas(source).drawColor(Color.WHITE)
+        val encoded = source.toPng()
+        source.recycle()
+
+        val prepared =
+            OcrImagePreprocessor.prepare(
+                OcrInput(image = OcrImageSource { ByteArrayInputStream(encoded) }),
+            )
+        try {
+            assertEquals(2048, prepared.bitmap.width)
+            assertEquals(683, prepared.bitmap.height)
+        } finally {
+            prepared.bitmap.recycle()
+        }
+    }
+
+    private fun JSONArray.assertIndexedSchema(
+        originalWidth: Int,
+        originalHeight: Int,
+    ) {
+        for (blockIndex in 0 until length()) {
+            val block = getJSONObject(blockIndex)
+            assertEquals(blockIndex, block.getInt("index"))
+            block.requireTextAndRect(originalWidth, originalHeight)
+            val lines = block.getJSONArray("lines")
+            assertFalse(lines.length() == 0)
+            for (lineIndex in 0 until lines.length()) {
+                val line = lines.getJSONObject(lineIndex)
+                assertEquals(lineIndex, line.getInt("index"))
+                line.requireTextAndRect(originalWidth, originalHeight)
+                val elements = line.getJSONArray("elements")
+                assertFalse(elements.length() == 0)
+                for (elementIndex in 0 until elements.length()) {
+                    val element = elements.getJSONObject(elementIndex)
+                    assertEquals(elementIndex, element.getInt("index"))
+                    element.requireTextAndRect(originalWidth, originalHeight)
+                }
+            }
+        }
+    }
+
+    private fun JSONObject.requireTextAndRect(
+        originalWidth: Int,
+        originalHeight: Int,
+    ) {
+        assertTrue(getString("text").isNotEmpty())
+        val rect = getJSONObject("rect")
+        val left = rect.getInt("left")
+        val top = rect.getInt("top")
+        val right = rect.getInt("right")
+        val bottom = rect.getInt("bottom")
+        assertTrue(left in 0..originalWidth)
+        assertTrue(right in left..originalWidth)
+        assertTrue(top in 0..originalHeight)
+        assertTrue(bottom in top..originalHeight)
+    }
+
+    private fun fixtureBitmap(): Bitmap =
+        Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888).also { bitmap ->
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.WHITE)
+            val paint =
+                Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+                    color = Color.BLACK
+                    textSize = 64f
+                    typeface = this@MlKitOcrGatewayTest.typeface
+                }
+            canvas.drawText("PageBinder OCR 構造化結果", 120f, 500f, paint)
+            canvas.drawText("日本語の文字座標を保存します", 120f, 640f, paint)
+        }
+
+    private fun Bitmap.rotate(degrees: Int): Bitmap =
+        Bitmap.createBitmap(
+            this,
+            0,
+            0,
+            width,
+            height,
+            Matrix().apply { postRotate(degrees.toFloat()) },
+            true,
+        )
+
+    private fun Bitmap.toPng(): ByteArray =
+        ByteArrayOutputStream().use { output ->
+            check(compress(Bitmap.CompressFormat.PNG, 100, output))
+            output.toByteArray()
+        }
+
+    private companion object {
+        const val WIDTH = 1200
+        const val HEIGHT = 1800
+        const val FONT_ASSET = "fonts/NotoSansJP-wght.ttf"
+    }
+}
