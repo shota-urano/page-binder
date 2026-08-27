@@ -1,6 +1,8 @@
 package com.pagebinder.app.ui.pagelist
 
 import androidx.annotation.StringRes
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
@@ -72,16 +74,6 @@ val PageListItemUiState.warningBadge: PageStatusBadge?
             PageQualityState.ERROR -> PageStatusBadge.WARNING_IMAGE_ERROR
         }
 
-/**
- * グリッドのセルに1つだけ出すバッジ。
- *
- * 3列のセル幅では pill を2つ並べられないため、モック（docs/design/mockups/07-page-list.png）と同じく
- * 警告があれば警告を、無ければ OCR状態を出す。両方を並べるのは横幅に余裕があるリスト表示側
- * （[PageStatusBadgeRow]）で行う。
- */
-val PageListItemUiState.gridBadge: PageStatusBadge
-    get() = warningBadge ?: ocrBadge
-
 /** 一覧セルの pill バッジ1つ */
 @Composable
 fun PageStatusBadgeChip(
@@ -108,7 +100,11 @@ fun PageStatusBadgeChip(
     }
 }
 
-/** 警告とOCR状態の両方を並べる（リスト表示用。警告が無ければOCR状態だけ） */
+/**
+ * 警告とOCR状態を横に並べる（リスト表示用）。
+ * OCR状態は常に出し、警告があるページはその左に警告バッジを足す
+ * （docs/specs/08-page-editing.md §3.1「各ページに OCR状態アイコン…と重複・黒画面警告を表示」）。
+ */
 @Composable
 fun PageStatusBadgeRow(
     item: PageListItemUiState,
@@ -118,6 +114,31 @@ fun PageStatusBadgeRow(
         item.warningBadge?.let { warning ->
             PageStatusBadgeChip(badge = warning)
             Spacer(modifier = Modifier.width(BADGE_ICON_GAP))
+        }
+        PageStatusBadgeChip(badge = item.ocrBadge)
+    }
+}
+
+/**
+ * 警告とOCR状態を縦に積む（グリッド表示用）。
+ *
+ * 3列のセル幅には pill を2つ横に並べられないので縦に積む。OCR状態はモックと同じ最下段に置き、
+ * 警告があるページだけその上に警告バッジが増える形にして、モック
+ * （docs/design/mockups/07-page-list.png）からの見た目の差を最小にしている。
+ * どちらの表示でもOCR状態は必ず出す（docs/specs/08-page-editing.md §3.1）。
+ */
+@Composable
+fun PageStatusBadgeStack(
+    item: PageListItemUiState,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(BADGE_ICON_GAP),
+    ) {
+        item.warningBadge?.let { warning ->
+            PageStatusBadgeChip(badge = warning)
         }
         PageStatusBadgeChip(badge = item.ocrBadge)
     }

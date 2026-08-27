@@ -47,16 +47,52 @@ class PageListScreenTest {
 
     @Test
     fun `表示切替でグリッドとリストが入れ替わる`() {
-        // 重複警告と完了が同時に付いたページ1件。グリッドは警告だけ、リストは警告+OCR状態を並べる
+        val viewModel = showScreen(samplePages())
+        composeTestRule.onNodeWithTag(PAGE_LIST_GRID_TEST_TAG).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(PAGE_LIST_ROWS_TEST_TAG).assertDoesNotExist()
+
+        composeTestRule
+            .onNodeWithContentDescription(string(R.string.page_list_view_mode_list))
+            .performClick()
+
+        assertEquals(PageListViewMode.LIST, viewModel.uiState.value.viewMode)
+        composeTestRule.onNodeWithTag(PAGE_LIST_ROWS_TEST_TAG).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(PAGE_LIST_GRID_TEST_TAG).assertDoesNotExist()
+
+        composeTestRule
+            .onNodeWithContentDescription(string(R.string.page_list_view_mode_grid))
+            .performClick()
+
+        assertEquals(PageListViewMode.GRID, viewModel.uiState.value.viewMode)
+        composeTestRule.onNodeWithTag(PAGE_LIST_GRID_TEST_TAG).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(PAGE_LIST_ROWS_TEST_TAG).assertDoesNotExist()
+    }
+
+    @Test
+    fun `警告のあるページはグリッドでもOCR状態と警告の両方を出す`() {
+        // docs/specs/08-page-editing.md §3.1: 各ページに OCR状態と重複・黒画面警告を表示する。
+        // 警告が付いたページでも OCR状態が消えてはいけない
+        showScreen(
+            listOf(
+                page(1, ocrState = PageOcrState.SUCCEEDED, qualityState = PageQualityState.DUPLICATE),
+                page(2, ocrState = PageOcrState.PENDING, qualityState = PageQualityState.BLACK),
+            ),
+        )
+
+        composeTestRule.onNodeWithText(string(R.string.page_list_warning_duplicate)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.page_list_ocr_succeeded)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.page_list_warning_black)).assertIsDisplayed()
+        composeTestRule.onNodeWithText(string(R.string.page_list_ocr_pending)).assertIsDisplayed()
+    }
+
+    @Test
+    fun `警告のあるページはリストでもOCR状態と警告の両方を出す`() {
         val viewModel =
             showScreen(
                 listOf(
-                    page(1, ocrState = PageOcrState.SUCCEEDED, qualityState = PageQualityState.DUPLICATE),
+                    page(1, ocrState = PageOcrState.STALE, qualityState = PageQualityState.DUPLICATE),
                 ),
             )
-
-        composeTestRule.onNodeWithText(string(R.string.page_list_warning_duplicate)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.page_list_ocr_succeeded)).assertDoesNotExist()
 
         composeTestRule
             .onNodeWithContentDescription(string(R.string.page_list_view_mode_list))
@@ -64,14 +100,7 @@ class PageListScreenTest {
 
         assertEquals(PageListViewMode.LIST, viewModel.uiState.value.viewMode)
         composeTestRule.onNodeWithText(string(R.string.page_list_warning_duplicate)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.page_list_ocr_succeeded)).assertIsDisplayed()
-
-        composeTestRule
-            .onNodeWithContentDescription(string(R.string.page_list_view_mode_grid))
-            .performClick()
-
-        assertEquals(PageListViewMode.GRID, viewModel.uiState.value.viewMode)
-        composeTestRule.onNodeWithText(string(R.string.page_list_ocr_succeeded)).assertDoesNotExist()
+        composeTestRule.onNodeWithText(string(R.string.page_list_ocr_stale)).assertIsDisplayed()
     }
 
     @Test
@@ -171,7 +200,7 @@ class PageListScreenTest {
         showScreen((1..LARGE_PAGE_COUNT).map { page(it) })
 
         composeTestRule
-            .onNodeWithTag(PAGE_LIST_CONTENT_TEST_TAG)
+            .onNodeWithTag(PAGE_LIST_GRID_TEST_TAG)
             .performScrollToIndex(LARGE_PAGE_COUNT - 1)
 
         composeTestRule.onNodeWithText(LARGE_PAGE_COUNT.toString()).assertIsDisplayed()

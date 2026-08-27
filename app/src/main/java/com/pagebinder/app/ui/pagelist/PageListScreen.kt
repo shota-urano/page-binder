@@ -90,8 +90,12 @@ class PageListScreenActions(
     val onReload: () -> Unit,
 )
 
-/** 500ページでもスクロールできることを見るためのテスト用タグ（docs/specs/08-page-editing.md §3.1） */
-const val PAGE_LIST_CONTENT_TEST_TAG = "pageListContent"
+/**
+ * テスト用タグ。表示切替が実際に入れ替わったこと・500ページでもスクロールできることを見る
+ * （docs/specs/08-page-editing.md §3.1）。
+ */
+const val PAGE_LIST_GRID_TEST_TAG = "pageListGrid"
+const val PAGE_LIST_ROWS_TEST_TAG = "pageListRows"
 
 /**
  * ページ一覧画面（docs/design/07-page-list.md / docs/specs/08-page-editing.md §3.1）。
@@ -364,7 +368,7 @@ private fun PageGrid(
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(GRID_COLUMNS),
-        modifier = modifier.fillMaxSize().testTag(PAGE_LIST_CONTENT_TEST_TAG),
+        modifier = modifier.fillMaxSize().testTag(PAGE_LIST_GRID_TEST_TAG),
         contentPadding = PaddingValues(horizontal = ScreenHorizontalMargin, vertical = SpaceUnit),
         horizontalArrangement = Arrangement.spacedBy(SpaceUnit),
         verticalArrangement = Arrangement.spacedBy(SpaceUnit),
@@ -462,8 +466,8 @@ private fun PageThumbnailCard(
                 targetWidth = GRID_THUMBNAIL_TARGET_WIDTH,
                 modifier = Modifier.fillMaxSize(),
             )
-            PageStatusBadgeChip(
-                badge = item.gridBadge,
+            PageStatusBadgeStack(
+                item = item,
                 modifier =
                     Modifier
                         .align(Alignment.BottomCenter)
@@ -486,7 +490,7 @@ private fun PageRows(
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
-        modifier = modifier.fillMaxSize().testTag(PAGE_LIST_CONTENT_TEST_TAG),
+        modifier = modifier.fillMaxSize().testTag(PAGE_LIST_ROWS_TEST_TAG),
     ) {
         items(items = uiState.visiblePages, key = { it.pageId }) { item ->
             PageListRow(
