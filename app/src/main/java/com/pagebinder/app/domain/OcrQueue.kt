@@ -1,5 +1,8 @@
 package com.pagebinder.app.domain
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.util.UUID
 
@@ -146,8 +149,10 @@ class OcrJobRunner(
                         processedAt = now(),
                     ),
                 )
-            } catch (error: kotlinx.coroutines.CancellationException) {
-                repository.returnToPending(page.id)
+            } catch (error: CancellationException) {
+                withContext(NonCancellable) {
+                    repository.returnToPending(page.id)
+                }
                 throw error
             } catch (_: OcrInputException) {
                 repository.markFailed(page.id)

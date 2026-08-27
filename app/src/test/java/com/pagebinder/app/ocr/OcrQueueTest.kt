@@ -21,6 +21,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -130,7 +131,11 @@ class OcrQueueTest {
                     },
                 )
             val lifecycle: CaptureSessionLifecycle = scheduler
-            val repository = FakeOcrJobRepository(page(OcrState.PENDING))
+            val repository =
+                FakeOcrJobRepository(
+                    page(OcrState.PENDING),
+                    suspendWhenReturningToPending = true,
+                )
             val recognitionStarted = CompletableDeferred<Unit>()
             val interruptibleGateway =
                 OcrGateway {
@@ -157,6 +162,7 @@ class OcrQueueTest {
                 assertFalse(executionPolicy.canRun())
                 assertTrue(runningWorker.isCancelled)
                 assertEquals(OcrState.PENDING, repository.state)
+                assertTrue(repository.returnToPendingReachedSuspensionPoint)
                 assertEquals(listOf(OcrState.RUNNING, OcrState.PENDING), repository.transitions)
                 assertEquals(1, cancellationCount)
 
@@ -244,10 +250,12 @@ class OcrQueueTest {
 
     private class FakeOcrJobRepository(
         vararg initialPages: OcrPage,
+        private val suspendWhenReturningToPending: Boolean = false,
     ) : OcrJobRepository {
         private val pages = initialPages.associateBy(OcrPage::id).toMutableMap()
         val transitions = mutableListOf<OcrState>()
         var result: StoredOcrResult? = null
+        var returnToPendingReachedSuspensionPoint = false
 
         val onlyPageId: UUID get() = pages.keys.single()
         val state: OcrState get() = pages.values.single().ocrState
@@ -289,8 +297,13 @@ class OcrQueueTest {
         override suspend fun markFailed(pageId: UUID): Boolean =
             transition(pageId, setOf(OcrState.RUNNING), OcrState.FAILED)
 
-        override suspend fun returnToPending(pageId: UUID): Boolean =
-            transition(pageId, setOf(OcrState.RUNNING), OcrState.PENDING)
+        override suspend fun returnToPending(pageId: UUID): Boolean {
+            if (suspendWhenReturningToPending) {
+                returnToPendingReachedSuspensionPoint = true
+                yield()
+            }
+            return transition(pageId, setOf(OcrState.RUNNING), OcrState.PENDING)
+        }
 
         private fun transition(
             pageId: UUID,

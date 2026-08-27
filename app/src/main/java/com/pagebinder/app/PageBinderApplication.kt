@@ -14,7 +14,7 @@ import com.pagebinder.app.ocr.OcrWorkerDependencies
 import com.pagebinder.app.ocr.WorkManagerOcrQueueScheduler
 import com.pagebinder.app.ocr.safeOcrImageFile
 
-class PageBinderApplication : Application(), OcrWorkerDependencies {
+open class PageBinderApplication : Application(), OcrWorkerDependencies {
     private val database by lazy {
         Room.databaseBuilder(this, PageBinderDatabase::class.java, DATABASE_NAME).build()
     }

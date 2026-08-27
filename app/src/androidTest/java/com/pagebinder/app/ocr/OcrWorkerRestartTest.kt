@@ -1,6 +1,5 @@
 package com.pagebinder.app.ocr
 
-import android.app.Application
 import android.app.Instrumentation
 import androidx.room.Dao
 import androidx.room.Database
@@ -10,8 +9,12 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.work.ListenableWorker
-import androidx.work.testing.TestListenableWorkerBuilder
+import androidx.work.Configuration
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.testing.SynchronousExecutor
+import androidx.work.testing.WorkManagerTestInitHelper
+import com.pagebinder.app.TestPageBinderApplication
 import com.pagebinder.app.data.OcrJobDao
 import com.pagebinder.app.data.OcrResultEntity
 import com.pagebinder.app.data.PageEntity
@@ -21,9 +24,12 @@ import com.pagebinder.app.domain.OcrGateway
 import com.pagebinder.app.domain.OcrImageSource
 import com.pagebinder.app.domain.OcrJobRunner
 import com.pagebinder.app.domain.OcrOutput
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.ByteArrayInputStream
@@ -32,18 +38,32 @@ import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
 class OcrWorkerRestartTest {
-    private val targetContext = InstrumentationRegistry.getInstrumentation().targetContext
+    private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    private val targetContext = instrumentation.targetContext
     private val databaseName = "ocr-worker-restart-${UUID.randomUUID()}.db"
     private var reopenedDatabase: TestOcrDatabase? = null
 
+    @Before
+    fun setUpWorkManager() {
+        val executor = SynchronousExecutor()
+        WorkManagerTestInitHelper.initializeTestWorkManager(
+            targetContext,
+            Configuration.Builder()
+                .setExecutor(executor)
+                .setTaskExecutor(executor)
+                .build(),
+        )
+    }
+
     @After
     fun tearDown() {
+        TestPageBinderApplication.testOcrJobRunner = null
         reopenedDatabase?.close()
         targetContext.deleteDatabase(databaseName)
     }
 
     @Test
-    fun workManagerWorkerRecoversJobsAfterApplicationAndDatabaseReopen() =
+    fun applicationStartupReschedulesAndRecoversJobsAfterDatabaseReopen() =
         runBlocking {
             val firstDatabase = openDatabase()
             firstDatabase.setupDao().insertPages(
@@ -55,7 +75,7 @@ class OcrWorkerRestartTest {
             firstDatabase.close()
 
             val database = openDatabase().also { reopenedDatabase = it }
-            val runner =
+            TestPageBinderApplication.testOcrJobRunner =
                 OcrJobRunner(
                     repository = RoomOcrJobRepository(database.ocrJobDao()),
                     gateway =
@@ -71,14 +91,27 @@ class OcrWorkerRestartTest {
                     executionPolicy = OcrExecutionPolicy { true },
                     now = { Instant.parse("2026-08-27T01:00:00Z") },
                 )
-            val recreatedApplication =
-                Instrumentation
-                    .newApplication(RestartedOcrApplication::class.java, targetContext)
-                    .let { it as RestartedOcrApplication }
-                    .also { it.runner = runner }
-            val worker = TestListenableWorkerBuilder<OcrWorker>(recreatedApplication).build()
 
-            assertEquals(ListenableWorker.Result.success(), worker.startWork().get())
+            val restartedApplication =
+                Instrumentation
+                    .newApplication(TestPageBinderApplication::class.java, targetContext)
+                    .let { it as TestPageBinderApplication }
+            instrumentation.callApplicationOnCreate(restartedApplication)
+
+            val workManager = WorkManager.getInstance(targetContext)
+            val startupWork = workManager.getWorkInfosForUniqueWork(OcrWorker.UNIQUE_WORK_NAME).get().single()
+            WorkManagerTestInitHelper.getTestDriver(targetContext)!!.setAllConstraintsMet(startupWork.id)
+
+            val completedWork =
+                withTimeout(10_000L) {
+                    var workInfo = requireNotNull(workManager.getWorkInfoById(startupWork.id).get())
+                    while (!workInfo.state.isFinished) {
+                        delay(10L)
+                        workInfo = requireNotNull(workManager.getWorkInfoById(startupWork.id).get())
+                    }
+                    workInfo
+                }
+            assertEquals(WorkInfo.State.SUCCEEDED, completedWork.state)
             assertEquals(listOf("succeeded", "succeeded"), database.setupDao().states())
             assertEquals(2, database.setupDao().resultCount())
         }
@@ -108,13 +141,6 @@ class OcrWorkerRestartTest {
         qualityState = "accepted",
         ocrState = state,
     )
-}
-
-internal class RestartedOcrApplication : Application(), OcrWorkerDependencies {
-    lateinit var runner: OcrJobRunner
-
-    override val ocrJobRunner: OcrJobRunner
-        get() = runner
 }
 
 @Dao
