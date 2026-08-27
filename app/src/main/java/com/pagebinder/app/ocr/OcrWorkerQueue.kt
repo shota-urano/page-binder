@@ -66,17 +66,20 @@ internal object CapturePriorityGate {
         }
 }
 
-internal class AndroidOcrExecutionPolicy(
-    context: Context,
+internal class AndroidOcrExecutionPolicy private constructor(
+    private val isThermallyConstrained: () -> Boolean,
 ) : OcrExecutionPolicy {
-    private val powerManager = context.getSystemService(PowerManager::class.java)
+    constructor(context: Context) : this(
+        isThermallyConstrained = {
+            android.os.Build.VERSION.SDK_INT >= 29 &&
+                context.getSystemService(PowerManager::class.java).currentThermalStatus >=
+                PowerManager.THERMAL_STATUS_SEVERE
+        },
+    )
 
-    override fun canRun(): Boolean =
-        !CapturePriorityGate.isCaptureActive &&
-            (
-                android.os.Build.VERSION.SDK_INT < 29 ||
-                    powerManager.currentThermalStatus < PowerManager.THERMAL_STATUS_SEVERE
-            )
+    internal constructor() : this(isThermallyConstrained = { false })
+
+    override fun canRun(): Boolean = !CapturePriorityGate.isCaptureActive && !isThermallyConstrained()
 }
 
 class OcrWorker(

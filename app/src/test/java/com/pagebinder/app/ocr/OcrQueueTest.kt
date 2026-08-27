@@ -16,8 +16,13 @@ import com.pagebinder.app.domain.OcrRecognitionException
 import com.pagebinder.app.domain.OcrRunResult
 import com.pagebinder.app.domain.OcrState
 import com.pagebinder.app.domain.StoredOcrResult
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -115,32 +120,66 @@ class OcrQueueTest {
         runTest {
             val policies = mutableListOf<ExistingWorkPolicy>()
             var cancellationCount = 0
+            lateinit var runningWorker: Job
             val scheduler =
                 WorkManagerOcrQueueScheduler(
                     enqueueWork = policies::add,
-                    cancelWork = { cancellationCount++ },
+                    cancelWork = {
+                        cancellationCount++
+                        runningWorker.cancel()
+                    },
                 )
             val lifecycle: CaptureSessionLifecycle = scheduler
             val repository = FakeOcrJobRepository(page(OcrState.PENDING))
+            val recognitionStarted = CompletableDeferred<Unit>()
+            val interruptibleGateway =
+                OcrGateway {
+                    recognitionStarted.complete(Unit)
+                    awaitCancellation()
+                }
+            val executionPolicy = AndroidOcrExecutionPolicy()
 
             try {
-                lifecycle.onSessionActive()
+                runningWorker =
+                    async {
+                        runner(
+                            repository,
+                            interruptibleGateway,
+                            executionPolicy,
+                        ).drain()
+                    }
+                recognitionStarted.await()
+                assertEquals(OcrState.RUNNING, repository.state)
 
-                assertEquals(
-                    OcrRunResult.Deferred,
-                    runner(
-                        repository,
-                        successfulGateway(),
-                        executionPolicy = OcrExecutionPolicy { !CapturePriorityGate.isCaptureActive },
-                    ).drain(),
-                )
+                lifecycle.onSessionActive()
+                runningWorker.join()
+
+                assertFalse(executionPolicy.canRun())
+                assertTrue(runningWorker.isCancelled)
                 assertEquals(OcrState.PENDING, repository.state)
+                assertEquals(listOf(OcrState.RUNNING, OcrState.PENDING), repository.transitions)
                 assertEquals(1, cancellationCount)
 
                 lifecycle.onSessionIdle()
 
+                assertTrue(executionPolicy.canRun())
                 assertEquals(listOf(ExistingWorkPolicy.APPEND_OR_REPLACE), policies)
+                assertEquals(
+                    OcrRunResult.QueueEmpty,
+                    runner(repository, successfulGateway(), executionPolicy).drain(),
+                )
+                assertEquals(OcrState.SUCCEEDED, repository.state)
+                assertEquals(
+                    listOf(
+                        OcrState.RUNNING,
+                        OcrState.PENDING,
+                        OcrState.RUNNING,
+                        OcrState.SUCCEEDED,
+                    ),
+                    repository.transitions,
+                )
             } finally {
+                runningWorker.cancel()
                 CapturePriorityGate.isCaptureActive = false
             }
         }
