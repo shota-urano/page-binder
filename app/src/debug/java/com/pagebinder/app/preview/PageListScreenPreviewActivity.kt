@@ -55,15 +55,20 @@ class PageListScreenPreviewActivity : ComponentActivity() {
                     thumbnailLoader = PreviewThumbnailLoader(pages),
                     onBack = { finish() },
                     onPageOpened = {},
-                    onDeleteSelectedRequested = {},
                     modifier = Modifier.fillMaxSize().safeDrawingPadding(),
                 )
             }
         }
     }
 
-    /** 読み出し専用の代役。一覧が使うのは findByProject だけ */
-    private class PreviewPageRepository(private val pages: List<Page>) : PageRepository {
+    /**
+     * メモリ上だけの代役。並べ替え・削除・直前1操作の取り消しを実機で確かめられるところまでを持つ。
+     * 実データの永続化は data 層の実装が受け持つ。
+     */
+    private class PreviewPageRepository(initialPages: List<Page>) : PageRepository {
+        private var pages: List<Page> = initialPages
+        private var undoSnapshot: List<Page>? = null
+
         override suspend fun insert(page: Page) = throw UnsupportedOperationException()
 
         override suspend fun findById(id: UUID): Page? = pages.firstOrNull { it.id == id }
@@ -73,12 +78,22 @@ class PageListScreenPreviewActivity : ComponentActivity() {
         override suspend fun reorder(
             projectId: UUID,
             orderedPageIds: List<UUID>,
-        ) = throw UnsupportedOperationException()
+        ) {
+            val byId = pages.associateBy(Page::id)
+            undoSnapshot = pages
+            pages = orderedPageIds.mapIndexedNotNull { index, id -> byId[id]?.copy(sequence = index + 1) }
+        }
 
         override suspend fun delete(
             projectId: UUID,
             pageIds: Set<UUID>,
-        ) = throw UnsupportedOperationException()
+        ) {
+            undoSnapshot = pages
+            pages =
+                pages
+                    .filterNot { it.id in pageIds }
+                    .mapIndexed { index, page -> page.copy(sequence = index + 1) }
+        }
 
         override suspend fun updateRotation(
             pageId: UUID,
@@ -90,7 +105,12 @@ class PageListScreenPreviewActivity : ComponentActivity() {
             crop: PageCrop,
         ) = throw UnsupportedOperationException()
 
-        override suspend fun undoLastEdit(): Boolean = throw UnsupportedOperationException()
+        override suspend fun undoLastEdit(): Boolean {
+            val snapshot = undoSnapshot ?: return false
+            pages = snapshot
+            undoSnapshot = null
+            return true
+        }
     }
 
     /**

@@ -10,8 +10,8 @@ import java.util.UUID
 /**
  * ページ一覧画面と ViewModel の接続。
  *
- * 画面遷移（編集画面へ・削除確認へ）は呼び出し側が決める。この画面は選択件数を確定させるところまでで、
- * 削除そのものは確認ダイアログを持つ実装単位の担当（docs/specs/08-page-editing.md §6・§9）。
+ * 一覧内で完結する編集（並べ替え・削除・取り消し）はこの画面が持つ（docs/specs/08-page-editing.md §3.2・§3.4）。
+ * 別画面への遷移（回転・切り取り編集）だけを呼び出し側が決める。
  */
 @Composable
 fun PageListRoute(
@@ -19,13 +19,12 @@ fun PageListRoute(
     thumbnailLoader: PageThumbnailLoader,
     onBack: () -> Unit,
     onPageOpened: (UUID) -> Unit,
-    onDeleteSelectedRequested: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     val actions =
-        remember(viewModel, onBack, onPageOpened, onDeleteSelectedRequested) {
+        remember(viewModel, onBack, onPageOpened) {
             PageListScreenActions(
                 onBack = onBack,
                 onViewModeChange = viewModel::onViewModeChange,
@@ -34,7 +33,13 @@ fun PageListRoute(
                 onPageLongPressed = viewModel::onPageLongPressed,
                 onSelectionToggled = viewModel::onSelectionToggled,
                 onSelectionCleared = viewModel::onSelectionCleared,
-                onDeleteSelectedRequested = onDeleteSelectedRequested,
+                onDeleteSelectedRequested = viewModel::onDeleteSelectedRequested,
+                onDeleteConfirmed = viewModel::onDeleteConfirmed,
+                onDeleteDismissed = viewModel::onDeleteDismissed,
+                onPageMoved = viewModel::onPageMoved,
+                onReorderFinished = viewModel::onReorderFinished,
+                onUndoRequested = viewModel::onUndoRequested,
+                onMessageDismissed = viewModel::onMessageDismissed,
                 onReload = viewModel::load,
             )
         }

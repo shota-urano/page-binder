@@ -94,6 +94,18 @@
     <string name="page_list_filter_empty">条件に一致するページはありません</string>
     <string name="page_list_load_failed">ページを読み込めませんでした</string>
     <string name="page_list_reload">再読み込み</string>
+    <string name="page_list_reorder_handle">%1$dページ目を並べ替え</string>
+    <string name="page_list_delete_dialog_title">ページを削除しますか?</string>
+    <string name="page_list_delete_dialog_message">選択中の%1$d件のページを削除します。削除したページは「元に戻す」で戻せます。</string>
+    <string name="page_list_delete_dialog_confirm">削除</string>
+    <string name="page_list_delete_dialog_cancel">キャンセル</string>
+    <string name="page_list_undo_delete">%1$d件のページを削除しました</string>
+    <string name="page_list_undo_reorder">ページの順序を変更しました</string>
+    <string name="page_list_undo_action">元に戻す</string>
+    <string name="page_list_message_dismiss">閉じる</string>
+    <string name="page_list_delete_failed">ページを削除できませんでした</string>
+    <string name="page_list_reorder_failed">並べ替えを保存できませんでした</string>
+    <string name="page_list_undo_failed">直前の操作を取り消せませんでした</string>
 
     <!-- OCR編集画面（docs/design/10-ocr-edit.md / docs/specs/09-ocr.md §3.5）
          ページ番号・本文は UiState から描く。モックの「12」と本文はサンプル -->
