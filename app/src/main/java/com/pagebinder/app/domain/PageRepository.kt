@@ -94,6 +94,9 @@ interface PageRepository {
         pageId: UUID,
         crop: PageCrop,
     )
+
+    /** Restores the state before the most recent successful page-editing operation. */
+    suspend fun undoLastEdit(): Boolean
 }
 
 sealed class PageRepositoryException(message: String) : Exception(message) {

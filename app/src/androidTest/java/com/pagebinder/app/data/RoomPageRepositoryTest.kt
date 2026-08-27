@@ -12,6 +12,8 @@ import com.pagebinder.app.domain.PageQualityState
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -94,6 +96,56 @@ class RoomPageRepositoryTest {
             assertEquals(crop, updated.crop)
             assertEquals(PageOcrState.STALE, updated.ocrState)
             assertEquals(originalPath, updated.originalImagePath)
+        }
+
+    @Test
+    fun undoRestoresStateBeforeReorder() =
+        runBlocking {
+            insertPages(4)
+            val before = repository.findByProject(projectId)
+
+            repository.reorder(projectId, listOf(pageIds[2], pageIds[0], pageIds[3], pageIds[1]))
+
+            assertTrue(repository.undoLastEdit())
+            assertEquals(before, repository.findByProject(projectId))
+            assertFalse(repository.undoLastEdit())
+        }
+
+    @Test
+    fun undoRestoresDeletedPagesCompletely() =
+        runBlocking {
+            insertPages(4, PageOcrState.SUCCEEDED)
+            repository.updateRotation(pageIds[2], 90)
+            val before = repository.findByProject(projectId)
+
+            repository.delete(projectId, setOf(pageIds[0], pageIds[2]))
+
+            assertTrue(repository.undoLastEdit())
+            assertEquals(before, repository.findByProject(projectId))
+        }
+
+    @Test
+    fun undoRestoresRotationAndOcrState() =
+        runBlocking {
+            insertPages(1, PageOcrState.SUCCEEDED)
+            val before = requireNotNull(repository.findById(pageIds[0]))
+
+            repository.updateRotation(pageIds[0], 90)
+
+            assertTrue(repository.undoLastEdit())
+            assertEquals(before, repository.findById(pageIds[0]))
+        }
+
+    @Test
+    fun undoRestoresCropAndOcrState() =
+        runBlocking {
+            insertPages(1, PageOcrState.FAILED)
+            val before = requireNotNull(repository.findById(pageIds[0]))
+
+            repository.updateCrop(pageIds[0], PageCrop(0.1f, 0.2f, 0.9f, 0.8f))
+
+            assertTrue(repository.undoLastEdit())
+            assertEquals(before, repository.findById(pageIds[0]))
         }
 
     private suspend fun insertPages(
