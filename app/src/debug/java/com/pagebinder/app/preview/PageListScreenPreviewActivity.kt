@@ -1,5 +1,7 @@
 package com.pagebinder.app.preview
 
+import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -15,6 +17,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.room.Room
+import com.pagebinder.app.data.PageBinderDatabase
+import com.pagebinder.app.data.RoomPageRepository
 import com.pagebinder.app.domain.Page
 import com.pagebinder.app.domain.PageCrop
 import com.pagebinder.app.domain.PageOcrState
@@ -25,6 +30,8 @@ import com.pagebinder.app.ui.pagelist.PageListViewModel
 import com.pagebinder.app.ui.pagelist.PageThumbnailLoader
 import com.pagebinder.app.ui.pagelist.PageThumbnailRequest
 import com.pagebinder.app.ui.theme.PageBinderTheme
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.util.UUID
 
@@ -32,84 +39,33 @@ import java.util.UUID
  * debug ビルド専用のページ一覧プレビュー。
  *
  * 撮影・OCR の配線が入るまでのあいだ、実機で画面を目視・スクリーンショットするための入口。
- * production の APK には含まれない。ここに置く値はプレビュー用の仮置きで、
- * production 側は UiState 経由で実データを描く。
+ * production の APK には含まれない。サムネイルだけはプレビュー用の仮置きだが、
+ * ページの読み書きは production と同じ data 層（Room）を通す。
  */
 class PageListScreenPreviewActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val pageRepository = PreviewPageStore.repository(applicationContext, PREVIEW_PAGES)
+        val thumbnailLoader = PreviewThumbnailLoader(PREVIEW_PAGES)
         setContent {
             PageBinderTheme {
-                val pages = PREVIEW_PAGES
                 val viewModel: PageListViewModel =
                     viewModel(
                         factory =
                             PageListViewModel.factory(
                                 projectId = PREVIEW_PROJECT_ID,
-                                pageRepository = PreviewPageRepository(pages),
+                                pageRepository = pageRepository,
                             ),
                     )
                 PageListRoute(
                     viewModel = viewModel,
-                    thumbnailLoader = PreviewThumbnailLoader(pages),
+                    thumbnailLoader = thumbnailLoader,
                     onBack = { finish() },
                     onPageOpened = {},
                     modifier = Modifier.fillMaxSize().safeDrawingPadding(),
                 )
             }
-        }
-    }
-
-    /**
-     * メモリ上だけの代役。並べ替え・削除・直前1操作の取り消しを実機で確かめられるところまでを持つ。
-     * 実データの永続化は data 層の実装が受け持つ。
-     */
-    private class PreviewPageRepository(initialPages: List<Page>) : PageRepository {
-        private var pages: List<Page> = initialPages
-        private var undoSnapshot: List<Page>? = null
-
-        override suspend fun insert(page: Page) = throw UnsupportedOperationException()
-
-        override suspend fun findById(id: UUID): Page? = pages.firstOrNull { it.id == id }
-
-        override suspend fun findByProject(projectId: UUID): List<Page> = pages
-
-        override suspend fun reorder(
-            projectId: UUID,
-            orderedPageIds: List<UUID>,
-        ) {
-            val byId = pages.associateBy(Page::id)
-            undoSnapshot = pages
-            pages = orderedPageIds.mapIndexedNotNull { index, id -> byId[id]?.copy(sequence = index + 1) }
-        }
-
-        override suspend fun delete(
-            projectId: UUID,
-            pageIds: Set<UUID>,
-        ) {
-            undoSnapshot = pages
-            pages =
-                pages
-                    .filterNot { it.id in pageIds }
-                    .mapIndexed { index, page -> page.copy(sequence = index + 1) }
-        }
-
-        override suspend fun updateRotation(
-            pageId: UUID,
-            rotation: Int,
-        ) = throw UnsupportedOperationException()
-
-        override suspend fun updateCrop(
-            pageId: UUID,
-            crop: PageCrop,
-        ) = throw UnsupportedOperationException()
-
-        override suspend fun undoLastEdit(): Boolean {
-            val snapshot = undoSnapshot ?: return false
-            pages = snapshot
-            undoSnapshot = null
-            return true
         }
     }
 
@@ -214,6 +170,70 @@ class PageListScreenPreviewActivity : ComponentActivity() {
                     qualityState = qualityState,
                     ocrState = ocrState,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * プレビュー用のページ保存先。
+ *
+ * production と同じ [RoomPageRepository] を通すので、並べ替え・削除・直前1操作の取り消しは
+ * Activity を閉じても残る（プレビューでも永続化を実機で確かめられる）。
+ * DB ファイルは production の `pagebinder.db` と分けてあり、実データには触れない。
+ * プロセス内で1個だけ持つ（Activity の作り直しで DB を開き直さないため）。
+ */
+private object PreviewPageStore {
+    private const val DATABASE_NAME = "pagebinder-page-list-preview.db"
+    private const val PREFERENCES_NAME = "page-list-preview"
+    private const val SEEDED_KEY = "seeded"
+
+    @Volatile
+    private var instance: PageRepository? = null
+
+    fun repository(
+        context: Context,
+        seedPages: List<Page>,
+    ): PageRepository =
+        instance ?: synchronized(this) {
+            instance ?: create(context, seedPages).also { instance = it }
+        }
+
+    private fun create(
+        context: Context,
+        seedPages: List<Page>,
+    ): PageRepository {
+        val database = Room.databaseBuilder(context, PageBinderDatabase::class.java, DATABASE_NAME).build()
+        return SeedingPageRepository(
+            delegate = RoomPageRepository(database.pageDao()),
+            preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE),
+            seedPages = seedPages,
+        )
+    }
+
+    /**
+     * 空の DB へ最初の1回だけサンプルページを入れる。
+     * 済みの印は SharedPreferences に置く。「全ページを消して閉じる」を
+     * 未 seed と取り違えて書き戻さないため（消した結果も残す）。
+     */
+    private class SeedingPageRepository(
+        private val delegate: PageRepository,
+        private val preferences: SharedPreferences,
+        private val seedPages: List<Page>,
+    ) : PageRepository by delegate {
+        private val seedLock = Mutex()
+
+        override suspend fun findByProject(projectId: UUID): List<Page> {
+            seedOnce()
+            return delegate.findByProject(projectId)
+        }
+
+        private suspend fun seedOnce() {
+            if (preferences.getBoolean(SEEDED_KEY, false)) return
+            seedLock.withLock {
+                if (preferences.getBoolean(SEEDED_KEY, false)) return
+                seedPages.forEach { delegate.insert(it) }
+                preferences.edit().putBoolean(SEEDED_KEY, true).apply()
             }
         }
     }
