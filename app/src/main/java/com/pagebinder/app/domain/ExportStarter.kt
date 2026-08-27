@@ -1,12 +1,43 @@
 package com.pagebinder.app.domain
 
+import kotlinx.coroutines.flow.Flow
+
+/** 書き出しの進行段階（`export/` の Export Engine が報告する段階を domain 語彙で表したもの） */
+enum class ExportProgressPhase {
+    QUEUED,
+    GENERATING,
+    WRITING,
+}
+
+/** 書き出しの経過（docs/specs/11-export.md §3.2 手順5・6） */
+sealed interface ExportProgressEvent {
+    data class Progress(
+        val phase: ExportProgressPhase,
+        val completedUnits: Int,
+        val totalUnits: Int,
+    ) : ExportProgressEvent
+
+    /** 保存先への書き込みが確定した（不完全なファイルは成功扱いしない — FR-EXP-007） */
+    data object Succeeded : ExportProgressEvent
+
+    /** [errorCode] は ExportRecord に記録される失敗コード（[ExportFailureCode] / [ExportStorageErrorCode]） */
+    data class Failed(val errorCode: String) : ExportProgressEvent
+}
+
+/** Export Engine が保存系以外の失敗に付ける errorCode */
+object ExportFailureCode {
+    const val CANCELLED = "cancelled"
+    const val GENERATION_FAILED = "generation_failed"
+}
+
 /**
  * 書き出しの開始要求（docs/specs/11-export.md §3.2 手順4以降）。
  *
- * 実処理（形式別ジェネレータ・SAF出力・進捗）は `export/` の Export Engine が実装する
- * — pagebinder-gph.5 の範囲であり、本タスクでは実装しない。
- * 出力形式・ファイル名・保存先URI の引き渡しは書き出し画面（pagebinder-gph.6）で引数として追加する。
+ * 実処理（形式別ジェネレータ・SAF出力・進捗）は `export/` の Export Engine が実装する。
+ * 書き出し画面はこの境界だけを見る（Room / PDFBox の型は越えてこない — AGENTS.md ルール4）。
+ *
+ * 返す [Flow] はコレクションを止めると書き出しをキャンセルする（ExportRecord は failed + cancelled）。
  */
 fun interface ExportStarter {
-    suspend fun startExport()
+    fun startExport(options: ExportOptions): Flow<ExportProgressEvent>
 }

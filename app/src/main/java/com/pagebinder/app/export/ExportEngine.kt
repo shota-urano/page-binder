@@ -1,6 +1,7 @@
 package com.pagebinder.app.export
 
 import com.pagebinder.app.domain.ExportDestination
+import com.pagebinder.app.domain.ExportFailureCode
 import com.pagebinder.app.domain.ExportRecord
 import com.pagebinder.app.domain.ExportRecordRepository
 import com.pagebinder.app.domain.ExportState
@@ -328,5 +329,5 @@ private fun ExportArtifact.totalUnits(): Int =
         is ExportArtifact.ImagePdf -> input.pages.size.coerceAtLeast(1)
     }
 
-private const val ERROR_CANCELLED = "cancelled"
-private const val ERROR_GENERATION_FAILED = "generation_failed"
+private const val ERROR_CANCELLED = ExportFailureCode.CANCELLED
+private const val ERROR_GENERATION_FAILED = ExportFailureCode.GENERATION_FAILED
