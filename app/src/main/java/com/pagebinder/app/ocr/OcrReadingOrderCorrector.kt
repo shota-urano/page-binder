@@ -27,21 +27,73 @@ internal object OcrReadingOrderCorrector {
         return vertical > horizontal
     }
 
-    private fun orderVertical(blocks: List<OcrReadingBlock>): List<Int> =
-        overlappingGroups(blocks) { first, second -> first.rect.horizontalOverlapRatio(second.rect) }
-            .sortedByDescending { group -> group.maxOf { it.rect.right } }
-            .flatMap { group -> group.sortedWith(compareBy({ it.rect.top }, { -it.rect.right }, { it.sourceIndex })) }
-            .map { it.sourceIndex }
+    private fun orderVertical(blocks: List<OcrReadingBlock>): List<Int> {
+        val layout = columnLayout(blocks)
+        val columns = layout.columns.sortedByDescending { group -> group.maxOf { it.rect.right } }
+        return orderColumnSections(
+            columns = columns,
+            spanningBlocks = layout.spanningBlocks,
+            blockComparator = compareBy({ it.rect.top }, { -it.rect.right }, { it.sourceIndex }),
+        )
+    }
 
     private fun orderHorizontal(blocks: List<OcrReadingBlock>): List<Int> {
-        val columns =
-            overlappingGroups(blocks) { first, second -> first.rect.horizontalOverlapRatio(second.rect) }
-                .sortedBy { group -> group.minOf { it.rect.left } }
+        val layout = columnLayout(blocks)
+        val columns = layout.columns.sortedBy { group -> group.minOf { it.rect.left } }
         if (columns.size < 2 || !columnsAreConcurrent(columns)) return blocks.map { it.sourceIndex }
 
-        return columns
-            .flatMap { column -> column.sortedWith(compareBy({ it.rect.top }, { it.rect.left }, { it.sourceIndex })) }
-            .map { it.sourceIndex }
+        return orderColumnSections(
+            columns = columns,
+            spanningBlocks = layout.spanningBlocks,
+            blockComparator = compareBy({ it.rect.top }, { it.rect.left }, { it.sourceIndex }),
+        )
+    }
+
+    /**
+     * Builds columns from normal-width blocks first. A wide block that overlaps more than one
+     * established column is kept out of the column graph so it cannot transitively merge them.
+     */
+    private fun columnLayout(blocks: List<OcrReadingBlock>): ColumnLayout {
+        val sortedWidths = blocks.map { it.rect.width }.sorted()
+        val typicalWidth = sortedWidths[(sortedWidths.size - 1) / 2]
+        val (wideCandidates, columnBlocks) =
+            blocks.partition { it.rect.width >= typicalWidth * SPANNING_WIDTH_RATIO }
+        val columns = overlappingGroups(columnBlocks).map { it.toMutableList() }.toMutableList()
+        val spanningBlocks = mutableListOf<OcrReadingBlock>()
+
+        wideCandidates.sortedWith(compareBy({ it.rect.width }, { it.sourceIndex })).forEach { block ->
+            val matchingColumns =
+                columns.filter { column ->
+                    column.any { member ->
+                        block.rect.horizontalOverlapRatio(member.rect) >= SAME_COLUMN_OVERLAP_RATIO
+                    }
+                }
+            when (matchingColumns.size) {
+                0 -> columns += mutableListOf(block)
+                1 -> matchingColumns.single() += block
+                else -> spanningBlocks += block
+            }
+        }
+        return ColumnLayout(columns = columns, spanningBlocks = spanningBlocks)
+    }
+
+    private fun orderColumnSections(
+        columns: List<List<OcrReadingBlock>>,
+        spanningBlocks: List<OcrReadingBlock>,
+        blockComparator: Comparator<OcrReadingBlock>,
+    ): List<Int> {
+        val remainingColumns = columns.map { it.sortedWith(blockComparator).toMutableList() }
+        val result = mutableListOf<OcrReadingBlock>()
+        spanningBlocks.sortedWith(blockComparator).forEach { spanningBlock ->
+            remainingColumns.forEach { column ->
+                val beforeSpanning = column.takeWhile { it.rect.top < spanningBlock.rect.top }
+                result += beforeSpanning
+                repeat(beforeSpanning.size) { column.removeAt(0) }
+            }
+            result += spanningBlock
+        }
+        remainingColumns.forEach { result += it }
+        return result.map { it.sourceIndex }
     }
 
     private fun columnsAreConcurrent(columns: List<List<OcrReadingBlock>>): Boolean {
@@ -59,10 +111,7 @@ internal object OcrReadingOrderCorrector {
         }
     }
 
-    private fun overlappingGroups(
-        blocks: List<OcrReadingBlock>,
-        overlap: (OcrReadingBlock, OcrReadingBlock) -> Float,
-    ): List<List<OcrReadingBlock>> {
+    private fun overlappingGroups(blocks: List<OcrReadingBlock>): List<List<OcrReadingBlock>> {
         val unvisited = blocks.toMutableSet()
         val result = mutableListOf<List<OcrReadingBlock>>()
         while (unvisited.isNotEmpty()) {
@@ -73,7 +122,9 @@ internal object OcrReadingOrderCorrector {
                 if (!unvisited.remove(current)) continue
                 group += current
                 unvisited
-                    .filter { candidate -> overlap(current, candidate) >= SAME_COLUMN_OVERLAP_RATIO }
+                    .filter { candidate ->
+                        current.rect.horizontalOverlapRatio(candidate.rect) >= SAME_COLUMN_OVERLAP_RATIO
+                    }
                     .forEach(pending::add)
             }
             result += group
@@ -100,4 +151,10 @@ internal object OcrReadingOrderCorrector {
     private const val ORIENTATION_RATIO = 1.2f
     private const val SAME_COLUMN_OVERLAP_RATIO = 0.5f
     private const val COLUMN_VERTICAL_OVERLAP_RATIO = 0.5f
+    private const val SPANNING_WIDTH_RATIO = 1.5f
+
+    private data class ColumnLayout(
+        val columns: List<List<OcrReadingBlock>>,
+        val spanningBlocks: List<OcrReadingBlock>,
+    )
 }
