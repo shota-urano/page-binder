@@ -1,0 +1,229 @@
+package com.pagebinder.app.export
+
+/** A framework-independent affine matrix using x' = ax + cy + tx, y' = bx + dy + ty. */
+internal data class PdfAffineMatrix(
+    val a: Float,
+    val b: Float,
+    val c: Float,
+    val d: Float,
+    val tx: Float,
+    val ty: Float,
+) {
+    fun map(point: PdfPoint): PdfPoint =
+        PdfPoint(
+            x = a * point.x + c * point.y + tx,
+            y = b * point.x + d * point.y + ty,
+        )
+
+    /** Returns a matrix that applies this transform and then [next]. */
+    fun then(next: PdfAffineMatrix): PdfAffineMatrix =
+        PdfAffineMatrix(
+            a = next.a * a + next.c * b,
+            b = next.b * a + next.d * b,
+            c = next.a * c + next.c * d,
+            d = next.b * c + next.d * d,
+            tx = next.a * tx + next.c * ty + next.tx,
+            ty = next.b * tx + next.d * ty + next.ty,
+        )
+}
+
+internal data class PdfPoint(
+    val x: Float,
+    val y: Float,
+)
+
+/** Rectangle in source-image coordinates, whose origin is at the top left. */
+internal data class OcrRect(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+) {
+    init {
+        require(listOf(left, top, right, bottom).all(Float::isFinite)) {
+            "OCR rectangle coordinates must be finite"
+        }
+        require(left <= right && top <= bottom) { "OCR rectangle must not be inverted" }
+    }
+}
+
+/** Rectangle in PDF coordinates, whose origin is at the bottom left. */
+internal data class PdfRect(
+    val left: Float,
+    val bottom: Float,
+    val right: Float,
+    val top: Float,
+) {
+    val width: Float get() = right - left
+    val height: Float get() = top - bottom
+}
+
+/** Crop bounds normalized against the image after rotation. */
+internal data class NormalizedCrop(
+    val left: Float = 0f,
+    val top: Float = 0f,
+    val right: Float = 1f,
+    val bottom: Float = 1f,
+) {
+    init {
+        require(listOf(left, top, right, bottom).all(Float::isFinite)) {
+            "Crop coordinates must be finite"
+        }
+        require(left in 0f..1f && top in 0f..1f && right in 0f..1f && bottom in 0f..1f) {
+            "Crop coordinates must be normalized"
+        }
+        require(left < right && top < bottom) { "Crop must have a positive area" }
+    }
+}
+
+internal data class PdfPageSize(
+    val width: Float,
+    val height: Float,
+) {
+    init {
+        require(width.isFinite() && height.isFinite() && width > 0f && height > 0f) {
+            "PDF page dimensions must be finite and positive"
+        }
+    }
+}
+
+internal data class OcrTextElement(
+    val text: String,
+    val rect: OcrRect,
+)
+
+internal data class OcrTextLine(
+    val text: String,
+    val rect: OcrRect,
+    val elements: List<OcrTextElement> = emptyList(),
+)
+
+internal data class OcrTextBlock(
+    val text: String,
+    val rect: OcrRect,
+    val lines: List<OcrTextLine> = emptyList(),
+)
+
+internal data class PdfTextPlacement(
+    val text: String,
+    val bounds: PdfRect,
+)
+
+/**
+ * Converts original-image/OCR coordinates to a ratio-preserving PDF page.
+ *
+ * The single [sourceToPdf] matrix applies clockwise rotation, crop translation, uniform page
+ * scaling, and the top-left to bottom-left origin conversion. The raster image and every OCR
+ * rectangle must use this same matrix.
+ */
+internal class PdfCoordinateTransformer private constructor(
+    val pageSize: PdfPageSize,
+    val sourceToPdf: PdfAffineMatrix,
+) {
+    fun map(point: PdfPoint): PdfPoint = sourceToPdf.map(point)
+
+    fun map(rect: OcrRect): PdfRect {
+        val corners =
+            listOf(
+                map(PdfPoint(rect.left, rect.top)),
+                map(PdfPoint(rect.right, rect.top)),
+                map(PdfPoint(rect.right, rect.bottom)),
+                map(PdfPoint(rect.left, rect.bottom)),
+            )
+        return PdfRect(
+            left = corners.minOf(PdfPoint::x),
+            bottom = corners.minOf(PdfPoint::y),
+            right = corners.maxOf(PdfPoint::x),
+            top = corners.maxOf(PdfPoint::y),
+        )
+    }
+
+    /** Uses element boxes when available, otherwise line boxes, then a block box as a last resort. */
+    fun createTextPlacements(blocks: List<OcrTextBlock>): List<PdfTextPlacement> =
+        buildList {
+            blocks.forEach { block ->
+                if (block.lines.isEmpty()) {
+                    addPlacement(block.text, block.rect)
+                } else {
+                    block.lines.forEach { line ->
+                        if (line.elements.isEmpty()) {
+                            addPlacement(line.text, line.rect)
+                        } else {
+                            line.elements.forEach { element -> addPlacement(element.text, element.rect) }
+                        }
+                    }
+                }
+            }
+        }
+
+    private fun MutableList<PdfTextPlacement>.addPlacement(
+        text: String,
+        rect: OcrRect,
+    ) {
+        if (text.isNotEmpty()) add(PdfTextPlacement(text, map(rect)))
+    }
+
+    companion object {
+        /**
+         * Builds a page using [pageWidth] and derives its height to preserve the cropped image's
+         * aspect ratio. Rotation is clockwise and crop coordinates refer to the rotated image.
+         */
+        fun create(
+            sourceWidth: Int,
+            sourceHeight: Int,
+            rotationDegrees: Int,
+            crop: NormalizedCrop = NormalizedCrop(),
+            pageWidth: Float,
+        ): PdfCoordinateTransformer {
+            require(sourceWidth > 0 && sourceHeight > 0) { "Source dimensions must be positive" }
+            require(rotationDegrees in setOf(0, 90, 180, 270)) {
+                "Rotation must be 0, 90, 180, or 270 degrees"
+            }
+            require(pageWidth.isFinite() && pageWidth > 0f) {
+                "PDF page width must be finite and positive"
+            }
+
+            val rotatedWidth = if (rotationDegrees % 180 == 0) sourceWidth.toFloat() else sourceHeight.toFloat()
+            val rotatedHeight = if (rotationDegrees % 180 == 0) sourceHeight.toFloat() else sourceWidth.toFloat()
+            val cropLeft = crop.left * rotatedWidth
+            val cropTop = crop.top * rotatedHeight
+            val croppedWidth = (crop.right - crop.left) * rotatedWidth
+            val croppedHeight = (crop.bottom - crop.top) * rotatedHeight
+            val scale = pageWidth / croppedWidth
+            val pageSize = PdfPageSize(pageWidth, croppedHeight * scale)
+
+            val sourceToRotated = rotationMatrix(rotationDegrees, sourceWidth.toFloat(), sourceHeight.toFloat())
+            val rotatedToCropped = translation(-cropLeft, -cropTop)
+            val croppedToPdf =
+                PdfAffineMatrix(
+                    a = scale,
+                    b = 0f,
+                    c = 0f,
+                    d = -scale,
+                    tx = 0f,
+                    ty = pageSize.height,
+                )
+            val sourceToPdf = sourceToRotated.then(rotatedToCropped).then(croppedToPdf)
+
+            return PdfCoordinateTransformer(pageSize, sourceToPdf)
+        }
+
+        private fun rotationMatrix(
+            degrees: Int,
+            sourceWidth: Float,
+            sourceHeight: Float,
+        ): PdfAffineMatrix =
+            when (degrees) {
+                0 -> PdfAffineMatrix(1f, 0f, 0f, 1f, 0f, 0f)
+                90 -> PdfAffineMatrix(0f, 1f, -1f, 0f, sourceHeight, 0f)
+                180 -> PdfAffineMatrix(-1f, 0f, 0f, -1f, sourceWidth, sourceHeight)
+                270 -> PdfAffineMatrix(0f, -1f, 1f, 0f, 0f, sourceWidth)
+                else -> error("Rotation was validated before matrix creation")
+            }
+
+        private fun translation(
+            x: Float,
+            y: Float,
+        ): PdfAffineMatrix = PdfAffineMatrix(1f, 0f, 0f, 1f, x, y)
+    }
+}
