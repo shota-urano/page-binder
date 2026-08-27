@@ -16,6 +16,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- debug 専用のページ一覧プレビュー。ランチャーには出さず `adb shell am start` で開く -->
+        <activity
+            android:name=".preview.PageListScreenPreviewActivity"
+            android:exported="true"
+            android:label="@string/page_list_preview_label"
+            android:theme="@style/Theme.PageBinder" />
     </application>
 
 </manifest>
