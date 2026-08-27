@@ -28,10 +28,10 @@ import androidx.compose.ui.unit.dp
 import com.pagebinder.app.R
 import com.pagebinder.app.domain.PageOcrState
 import com.pagebinder.app.domain.PageQualityState
-import com.pagebinder.app.ui.theme.ColorAccent
+import com.pagebinder.app.ui.theme.ColorAccentContainer
+import com.pagebinder.app.ui.theme.ColorAccentContent
 import com.pagebinder.app.ui.theme.ColorError
 import com.pagebinder.app.ui.theme.ColorPrimary
-import com.pagebinder.app.ui.theme.ColorText
 import com.pagebinder.app.ui.theme.ColorTextSecondary
 import com.pagebinder.app.ui.theme.ColorWarning
 
@@ -122,7 +122,7 @@ fun PageStatusBadgeRow(
 /**
  * 警告とOCR状態を縦に積む（グリッド表示用）。
  *
- * 3列のセル幅には pill を2つ横に並べられないので縦に積む。OCR状態はモックと同じ最下段に置き、
+ * 3列のセル幅には pill を2つ横に並べられないので縦に積む。OCR状態はモックと同じ最下段・左寄せに置き、
  * 警告があるページだけその上に警告バッジが増える形にして、モック
  * （docs/design/mockups/07-page-list.png）からの見た目の差を最小にしている。
  * どちらの表示でもOCR状態は必ず出す（docs/specs/08-page-editing.md §3.1）。
@@ -134,7 +134,7 @@ fun PageStatusBadgeStack(
 ) {
     Column(
         modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
+        horizontalAlignment = Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(BADGE_ICON_GAP),
     ) {
         item.warningBadge?.let { warning ->
@@ -184,14 +184,14 @@ private fun BadgeIcon(
 
 /**
  * バッジの地色。
- * 「完了」だけが静かな表示（`--color-accent` 地 + 本文色）で、注意を引きたい状態は塗り+白文字にする
+ * 「完了」だけが静かな表示（accent の淡地 + 濃い accent の文字）で、注意を引きたい状態は塗り+白文字にする
  * — モック（docs/design/mockups/07-page-list.png）の見え方に合わせた使い分け。
  */
 private fun PageStatusBadge.containerColor(): Color =
     when (this) {
         PageStatusBadge.OCR_PENDING -> ColorTextSecondary
         PageStatusBadge.OCR_RUNNING -> ColorPrimary
-        PageStatusBadge.OCR_SUCCEEDED -> ColorAccent
+        PageStatusBadge.OCR_SUCCEEDED -> ColorAccentContainer
         PageStatusBadge.OCR_FAILED -> ColorError
         PageStatusBadge.OCR_STALE -> ColorWarning
         PageStatusBadge.WARNING_DUPLICATE, PageStatusBadge.WARNING_BLACK -> ColorWarning
@@ -200,8 +200,8 @@ private fun PageStatusBadge.containerColor(): Color =
 
 private fun PageStatusBadge.contentColor(): Color =
     when (this) {
-        // ミント地の上は白文字だとコントラストが足りないので本文色（原則: 本文コントラストは AA）
-        PageStatusBadge.OCR_SUCCEEDED -> ColorText
+        // ミントの淡地の上は白文字だとコントラストが足りないので濃い accent（約7.5:1）
+        PageStatusBadge.OCR_SUCCEEDED -> ColorAccentContent
         else -> Color.White
     }
 

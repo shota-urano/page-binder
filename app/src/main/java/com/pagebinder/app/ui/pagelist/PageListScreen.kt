@@ -292,7 +292,11 @@ private fun ViewModeToggle(
     }
 }
 
-/** 選択側に primary の枠を付ける（docs/design/07-page-list.md「選択側に枠」） */
+/**
+ * 選択側に primary の枠を付ける（docs/design/07-page-list.md「選択側に枠」）。
+ * 地は塗らない — モックの選択側も地色は背景のままで、
+ * 様式は Secondary ボタン（枠線 primary・文字 primary・透明地。docs/design/system/02-components.md）に合わせる。
+ */
 @Composable
 private fun ViewModeButton(
     selected: Boolean,
@@ -307,9 +311,7 @@ private fun ViewModeButton(
                 .size(TOGGLE_BUTTON_WIDTH, MinTouchTarget)
                 .then(
                     if (selected) {
-                        Modifier
-                            .background(ColorPrimary.copy(alpha = SELECTED_SURFACE_ALPHA), selectionShape)
-                            .border(SELECTED_BORDER_WIDTH, ColorPrimary, selectionShape)
+                        Modifier.border(SELECTED_BORDER_WIDTH, ColorPrimary, selectionShape)
                     } else {
                         Modifier
                     },
@@ -476,12 +478,14 @@ private fun PageThumbnailCard(
                 targetWidth = GRID_THUMBNAIL_TARGET_WIDTH,
                 modifier = Modifier.fillMaxSize(),
             )
+            // モックはカード左下・左右とも8dpのインセット（docs/design/mockups/07-page-list.png）。
+            // 長文バッジ（「再実行が必要」）でも端の余白を食い潰さないよう end 側も同じだけ空ける
             PageStatusBadgeStack(
                 item = item,
                 modifier =
                     Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = SpaceUnit),
+                        .align(Alignment.BottomStart)
+                        .padding(start = SpaceUnit, end = SpaceUnit, bottom = SpaceUnit),
             )
         }
     }
