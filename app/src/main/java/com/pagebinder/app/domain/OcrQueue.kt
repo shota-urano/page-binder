@@ -64,6 +64,13 @@ fun interface OcrQueueScheduler {
     fun wake()
 }
 
+/** Domain boundary required by the future capture-session coordinator for Active/Idle transitions. */
+interface CaptureSessionLifecycle {
+    fun onSessionActive()
+
+    fun onSessionIdle()
+}
+
 /** Entry point used by capture, retry, bulk OCR, and application-start recovery. */
 class OcrQueue(
     private val repository: OcrJobRepository,

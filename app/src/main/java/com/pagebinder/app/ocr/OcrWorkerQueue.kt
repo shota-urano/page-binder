@@ -8,6 +8,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.pagebinder.app.domain.CaptureSessionLifecycle
 import com.pagebinder.app.domain.OcrExecutionPolicy
 import com.pagebinder.app.domain.OcrJobRunner
 import com.pagebinder.app.domain.OcrQueueScheduler
@@ -17,31 +18,40 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
-class WorkManagerOcrQueueScheduler(
-    private val context: Context,
-) : OcrQueueScheduler {
+class WorkManagerOcrQueueScheduler internal constructor(
+    private val enqueueWork: (ExistingWorkPolicy) -> Unit,
+    private val cancelWork: () -> Unit,
+) : OcrQueueScheduler, CaptureSessionLifecycle {
+    constructor(context: Context) : this(
+        enqueueWork = { policy ->
+            val request =
+                OneTimeWorkRequestBuilder<OcrWorker>()
+                    .setConstraints(Constraints.Builder().setRequiresBatteryNotLow(true).build())
+                    .setBackoffCriteria(
+                        androidx.work.BackoffPolicy.LINEAR,
+                        OcrWorker.MIN_BACKOFF_SECONDS,
+                        TimeUnit.SECONDS,
+                    ).build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                OcrWorker.UNIQUE_WORK_NAME,
+                policy,
+                request,
+            )
+        },
+        cancelWork = { WorkManager.getInstance(context).cancelUniqueWork(OcrWorker.UNIQUE_WORK_NAME) },
+    )
+
     override fun wake() {
-        val request =
-            OneTimeWorkRequestBuilder<OcrWorker>()
-                .setConstraints(Constraints.Builder().setRequiresBatteryNotLow(true).build())
-                .setBackoffCriteria(
-                    androidx.work.BackoffPolicy.LINEAR,
-                    OcrWorker.MIN_BACKOFF_SECONDS,
-                    TimeUnit.SECONDS,
-                ).build()
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            OcrWorker.UNIQUE_WORK_NAME,
-            ExistingWorkPolicy.KEEP,
-            request,
-        )
+        // A wake racing with a running worker must leave a successor behind. KEEP can drop it.
+        enqueueWork(ExistingWorkPolicy.APPEND_OR_REPLACE)
     }
 
-    fun onCaptureStarted() {
+    override fun onSessionActive() {
         CapturePriorityGate.isCaptureActive = true
-        WorkManager.getInstance(context).cancelUniqueWork(OcrWorker.UNIQUE_WORK_NAME)
+        cancelWork()
     }
 
-    fun onCaptureStopped() {
+    override fun onSessionIdle() {
         CapturePriorityGate.isCaptureActive = false
         wake()
     }

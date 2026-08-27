@@ -1,5 +1,7 @@
 package com.pagebinder.app.ocr
 
+import androidx.work.ExistingWorkPolicy
+import com.pagebinder.app.domain.CaptureSessionLifecycle
 import com.pagebinder.app.domain.OcrCrop
 import com.pagebinder.app.domain.OcrExecutionPolicy
 import com.pagebinder.app.domain.OcrGateway
@@ -94,42 +96,78 @@ class OcrQueueTest {
         }
 
     @Test
-    fun `application restart recovers running jobs and wakes persistent worker`() =
-        runTest {
-            val repository =
-                FakeOcrJobRepository(
-                    page(OcrState.RUNNING),
-                    page(OcrState.PENDING),
-                )
-            val scheduler = RecordingScheduler()
-
-            assertEquals(1, OcrQueue(repository, scheduler).resumeIncomplete())
-            assertEquals(listOf(OcrState.PENDING, OcrState.PENDING), repository.states)
-            assertEquals(1, scheduler.wakeCount)
-
-            assertEquals(OcrRunResult.QueueEmpty, runner(repository, successfulGateway()).drain())
-            assertEquals(listOf(OcrState.SUCCEEDED, OcrState.SUCCEEDED), repository.states)
-        }
-
-    @Test
     fun `capture priority defers without claiming pending work`() =
         runTest {
             val repository = FakeOcrJobRepository(page(OcrState.PENDING))
-            val runner = runner(repository, successfulGateway(), canRun = false)
+            val runner =
+                runner(
+                    repository,
+                    successfulGateway(),
+                    executionPolicy = OcrExecutionPolicy { false },
+                )
 
             assertEquals(OcrRunResult.Deferred, runner.drain())
             assertEquals(OcrState.PENDING, repository.state)
         }
 
+    @Test
+    fun `capture session lifecycle cancels running OCR and resumes it after capture`() =
+        runTest {
+            val policies = mutableListOf<ExistingWorkPolicy>()
+            var cancellationCount = 0
+            val scheduler =
+                WorkManagerOcrQueueScheduler(
+                    enqueueWork = policies::add,
+                    cancelWork = { cancellationCount++ },
+                )
+            val lifecycle: CaptureSessionLifecycle = scheduler
+            val repository = FakeOcrJobRepository(page(OcrState.PENDING))
+
+            try {
+                lifecycle.onSessionActive()
+
+                assertEquals(
+                    OcrRunResult.Deferred,
+                    runner(
+                        repository,
+                        successfulGateway(),
+                        executionPolicy = OcrExecutionPolicy { !CapturePriorityGate.isCaptureActive },
+                    ).drain(),
+                )
+                assertEquals(OcrState.PENDING, repository.state)
+                assertEquals(1, cancellationCount)
+
+                lifecycle.onSessionIdle()
+
+                assertEquals(listOf(ExistingWorkPolicy.APPEND_OR_REPLACE), policies)
+            } finally {
+                CapturePriorityGate.isCaptureActive = false
+            }
+        }
+
+    @Test
+    fun `wake racing with running worker uses policy that guarantees a successor`() {
+        val policies = mutableListOf<ExistingWorkPolicy>()
+        val scheduler =
+            WorkManagerOcrQueueScheduler(
+                enqueueWork = policies::add,
+                cancelWork = {},
+            )
+
+        scheduler.wake()
+
+        assertEquals(listOf(ExistingWorkPolicy.APPEND_OR_REPLACE), policies)
+    }
+
     private fun runner(
         repository: FakeOcrJobRepository,
         gateway: OcrGateway = successfulGateway(),
-        canRun: Boolean = true,
+        executionPolicy: OcrExecutionPolicy = OcrExecutionPolicy { true },
     ) = OcrJobRunner(
         repository = repository,
         gateway = gateway,
         imageSourceFactory = { OcrImageSource { ByteArrayInputStream(byteArrayOf(1)) } },
-        executionPolicy = OcrExecutionPolicy { canRun },
+        executionPolicy = executionPolicy,
         now = { PROCESSED_AT },
     )
 

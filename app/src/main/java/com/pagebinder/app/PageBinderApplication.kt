@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.room.Room
 import com.pagebinder.app.data.PageBinderDatabase
 import com.pagebinder.app.data.RoomOcrJobRepository
+import com.pagebinder.app.domain.CaptureSessionLifecycle
 import com.pagebinder.app.domain.OcrImageSource
 import com.pagebinder.app.domain.OcrJobRunner
 import com.pagebinder.app.domain.OcrQueue
@@ -20,6 +21,7 @@ class PageBinderApplication : Application(), OcrWorkerDependencies {
     private val repository by lazy { RoomOcrJobRepository(database.ocrJobDao()) }
     val ocrQueueScheduler by lazy { WorkManagerOcrQueueScheduler(this) }
     val ocrQueue by lazy { OcrQueue(repository, ocrQueueScheduler) }
+    val captureSessionLifecycle: CaptureSessionLifecycle by lazy { ocrQueueScheduler }
 
     override val ocrJobRunner: OcrJobRunner by lazy {
         OcrJobRunner(
