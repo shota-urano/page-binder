@@ -18,6 +18,7 @@
         tools:node="remove" />
 
     <application
+        android:name=".PageBinderApplication"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.PageBinder">
