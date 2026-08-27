@@ -39,16 +39,19 @@ abstract class VerifyMergedManifestTask : DefaultTask() {
             )
         val violations = mutableListOf<String>()
 
-        val permissionElements = document.getElementsByTagName("uses-permission")
-        for (index in 0 until permissionElements.length) {
-            val permission =
-                permissionElements
-                    .item(index)
-                    .attributes
-                    .getNamedItemNS(androidNamespace, "name")
-                    ?.nodeValue
-            if (permission in forbiddenPermissions) {
-                violations += "forbidden permission: $permission"
+        val permissionElementNames = setOf("uses-permission", "uses-permission-sdk-23")
+        for (elementName in permissionElementNames) {
+            val permissionElements = document.getElementsByTagName(elementName)
+            for (index in 0 until permissionElements.length) {
+                val permission =
+                    permissionElements
+                        .item(index)
+                        .attributes
+                        .getNamedItemNS(androidNamespace, "name")
+                        ?.nodeValue
+                if (permission in forbiddenPermissions) {
+                    violations += "forbidden permission: $permission"
+                }
             }
         }
 
