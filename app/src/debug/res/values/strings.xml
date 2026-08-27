@@ -2,4 +2,5 @@
 <resources>
     <!-- debug ビルドだけに入るプレビュー入口のラベル -->
     <string name="export_preview_label">PageBinder 書き出しプレビュー</string>
+    <string name="page_list_preview_label">PageBinder ページ一覧プレビュー</string>
 </resources>

@@ -66,4 +66,32 @@
     <string name="export_result_destination_unavailable">保存先へ書き込めませんでした。端末内の保存先を選び直してお試しください。</string>
     <string name="export_result_write_failed">書き出しに失敗しました。空き容量を確認し、保存先を選び直してお試しください。</string>
     <string name="export_result_dismiss">閉じる</string>
+
+    <!-- ページ一覧画面（docs/design/07-page-list.md / docs/specs/08-page-editing.md §3.1）
+         状態バッジの文言は docs/design/system/02-components.md の規定どおり -->
+    <string name="page_list_title">ページ一覧</string>
+    <string name="page_list_back">戻る</string>
+    <string name="page_list_view_mode_grid">グリッド表示</string>
+    <string name="page_list_view_mode_list">リスト表示</string>
+    <string name="page_list_filter_all">すべてのページ</string>
+    <string name="page_list_filter_duplicate">重複の候補</string>
+    <string name="page_list_filter_black">黒画面の候補</string>
+    <string name="page_list_filter_ocr_incomplete">OCR未完了</string>
+    <string name="page_list_selection_count">%1$d件を選択中</string>
+    <string name="page_list_selection_delete">選択したページを削除</string>
+    <string name="page_list_selection_clear">選択を解除</string>
+    <string name="page_list_page_number">%1$d</string>
+    <string name="page_list_ocr_pending">待機</string>
+    <string name="page_list_ocr_running">実行中</string>
+    <string name="page_list_ocr_succeeded">完了</string>
+    <string name="page_list_ocr_failed">失敗</string>
+    <string name="page_list_ocr_stale">再実行が必要</string>
+    <string name="page_list_warning_duplicate">重複</string>
+    <string name="page_list_warning_black">黒画面</string>
+    <string name="page_list_warning_image_error">画像エラー</string>
+    <string name="page_list_thumbnail_retry">サムネイルを作り直す</string>
+    <string name="page_list_empty">ページがありません</string>
+    <string name="page_list_filter_empty">条件に一致するページはありません</string>
+    <string name="page_list_load_failed">ページを読み込めませんでした</string>
+    <string name="page_list_reload">再読み込み</string>
 </resources>
