@@ -4,6 +4,7 @@ import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
@@ -18,7 +19,21 @@ import com.pagebinder.app.domain.StoredOcrResult
 import java.time.Instant
 import java.util.UUID
 
-@Entity(tableName = "pages")
+@Entity(tableName = "book_projects")
+data class BookProjectEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val author: String?,
+    val note: String?,
+    @ColumnInfo(name = "created_at") val createdAt: String,
+    @ColumnInfo(name = "updated_at") val updatedAt: String,
+    @ColumnInfo(name = "deleted_at") val deletedAt: String?,
+)
+
+@Entity(
+    tableName = "pages",
+    indices = [Index(value = ["project_id", "sequence"], unique = true)],
+)
 data class PageEntity(
     @PrimaryKey val id: String,
     @ColumnInfo(name = "project_id") val projectId: String,
@@ -112,11 +127,13 @@ interface OcrJobDao {
 }
 
 @Database(
-    entities = [PageEntity::class, OcrResultEntity::class, ExportRecordEntity::class],
+    entities = [BookProjectEntity::class, PageEntity::class, OcrResultEntity::class, ExportRecordEntity::class],
     version = 1,
     exportSchema = false,
 )
 abstract class PageBinderDatabase : RoomDatabase() {
+    abstract fun pageDao(): PageDao
+
     abstract fun ocrJobDao(): OcrJobDao
 
     abstract fun exportRecordDao(): ExportRecordDao
