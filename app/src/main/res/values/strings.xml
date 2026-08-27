@@ -94,4 +94,40 @@
     <string name="page_list_filter_empty">条件に一致するページはありません</string>
     <string name="page_list_load_failed">ページを読み込めませんでした</string>
     <string name="page_list_reload">再読み込み</string>
+
+    <!-- OCR編集画面（docs/design/10-ocr-edit.md / docs/specs/09-ocr.md §3.5）
+         ページ番号・本文は UiState から描く。モックの「12」と本文はサンプル -->
+    <string name="ocr_edit_title">ページ %1$d のOCR</string>
+    <string name="ocr_edit_back">戻る</string>
+    <string name="ocr_edit_search">ページ内を検索</string>
+    <string name="ocr_edit_search_hint">ページ内を検索</string>
+    <string name="ocr_edit_search_close">検索を閉じる</string>
+    <string name="ocr_edit_search_previous">前の一致へ</string>
+    <string name="ocr_edit_search_next">次の一致へ</string>
+    <string name="ocr_edit_search_match_count">%1$d/%2$d件</string>
+    <string name="ocr_edit_search_no_match">一致なし</string>
+    <string name="ocr_edit_rerun">OCRを再実行</string>
+    <string name="ocr_edit_zoom_out">縮小</string>
+    <string name="ocr_edit_zoom_in">拡大</string>
+    <string name="ocr_edit_zoom_percent">%1$d%%</string>
+    <string name="ocr_edit_split_handle">画像とテキストの分割位置</string>
+    <string name="ocr_edit_badge_edited">修正済み</string>
+    <string name="ocr_edit_original_preserved">元のOCR結果は保持されます</string>
+    <string name="ocr_edit_original_shown">元のOCR結果を表示しています</string>
+    <string name="ocr_edit_revert">元のOCR結果へ戻す</string>
+    <string name="ocr_edit_save">保存</string>
+    <string name="ocr_edit_revert_dialog_title">元のOCR結果へ戻しますか</string>
+    <string name="ocr_edit_revert_dialog_message">手動で修正した本文（%1$d文字）を破棄して、元のOCR結果に戻します。元のOCR結果は変わりません。</string>
+    <string name="ocr_edit_revert_dialog_confirm">破棄して戻す</string>
+    <string name="ocr_edit_revert_dialog_cancel">キャンセル</string>
+    <string name="ocr_edit_message_saved">修正を保存しました</string>
+    <string name="ocr_edit_message_save_failed">修正を保存できませんでした。もう一度お試しください。</string>
+    <string name="ocr_edit_message_reverted">元のOCR結果へ戻しました</string>
+    <string name="ocr_edit_message_revert_failed">元のOCR結果へ戻せませんでした。もう一度お試しください。</string>
+    <string name="ocr_edit_message_rerun_queued">OCRの再実行を予約しました</string>
+    <string name="ocr_edit_message_rerun_failed">OCRの再実行を予約できませんでした</string>
+    <string name="ocr_edit_result_missing">このページのOCR結果はまだありません。右上の再実行からOCRを実行してください。</string>
+    <string name="ocr_edit_load_failed">OCR結果を読み込めませんでした</string>
+    <string name="ocr_edit_reload">再読み込み</string>
+    <string name="ocr_edit_image_retry">画像を読み込み直す</string>
 </resources>
