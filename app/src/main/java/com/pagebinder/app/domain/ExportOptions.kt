@@ -25,13 +25,19 @@ sealed interface ExportPageRange {
 /**
  * PDF の画質。
  *
- * **暫定値**: docs/design/11-export.md「未定事項」に「PDF画質の選択肢と既定値」とあり、
- * specs 側にも列挙が無い。素材に現れる「標準」を既定とし、上下1段ずつを置いた暫定の3段階。
- * 実際の解像度・圧縮率は PDF 実装（docs/specs/10-searchable-pdf.md）側で確定する。
+ * 「高画質 / 標準 / 軽量」の3段階・既定は「標準」（docs/design/11-export.md
+ * コンポーネント一覧「PDF画質」— 2026-08-27 確定）。表示文言は
+ * `export_pdf_quality_high` / `_standard` / `_compact` が持つ。
+ * 実際の解像度・圧縮率は PDF 実装（docs/specs/10-searchable-pdf.md）側で決める。
  */
 enum class ExportPdfQuality(val serializedName: String) {
+    /** 高画質 */
     HIGH("high"),
+
+    /** 標準（既定値。書き出し画面の初期選択） */
     STANDARD("standard"),
+
+    /** 軽量 */
     COMPACT("compact"),
 }
 
