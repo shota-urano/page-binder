@@ -98,6 +98,15 @@ const val PAGE_LIST_GRID_TEST_TAG = "pageListGrid"
 const val PAGE_LIST_ROWS_TEST_TAG = "pageListRows"
 
 /**
+ * グリッドのセル1件に付くタグ。§3.1 の「各ページに OCR状態…と重複・黒画面警告を表示」を
+ * ページ単位で確認できるようにする（画面全体から文言を探すと、どのページに何が付いたか分からない）。
+ */
+fun pageListCellTestTag(sequence: Int): String = "pageListCell_$sequence"
+
+/** リスト表示の行1件に付くタグ。用途は [pageListCellTestTag] と同じ */
+fun pageListRowTestTag(sequence: Int): String = "pageListRow_$sequence"
+
+/**
  * ページ一覧画面（docs/design/07-page-list.md / docs/specs/08-page-editing.md §3.1）。
  *
  * 描くのはアプリバーから下のコンテンツ領域だけで、ステータスバー・ナビゲーションバーは OS が描く
@@ -400,6 +409,7 @@ private fun PageGridCell(
         modifier =
             modifier
                 .fillMaxWidth()
+                .testTag(pageListCellTestTag(item.sequence))
                 .then(
                     if (selected) {
                         Modifier.border(SELECTED_BORDER_WIDTH, ColorPrimary, cellShape)
@@ -520,6 +530,7 @@ private fun PageListRow(
             modifier
                 .fillMaxWidth()
                 .height(LIST_ROW_HEIGHT)
+                .testTag(pageListRowTestTag(item.sequence))
                 .background(
                     if (selected) ColorPrimary.copy(alpha = SELECTED_SURFACE_ALPHA) else Color.Transparent,
                 ).combinedClickable(

@@ -3,7 +3,11 @@ package com.pagebinder.app.ui.pagelist
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -69,39 +73,90 @@ class PageListScreenTest {
     }
 
     @Test
-    fun `警告のあるページはグリッドでもOCR状態と警告の両方を出す`() {
+    fun `グリッドは各セルの中にOCR状態と警告を併記する`() {
         // docs/specs/08-page-editing.md §3.1: 各ページに OCR状態と重複・黒画面警告を表示する。
-        // 警告が付いたページでも OCR状態が消えてはいけない
-        showScreen(
-            listOf(
-                page(1, ocrState = PageOcrState.SUCCEEDED, qualityState = PageQualityState.DUPLICATE),
-                page(2, ocrState = PageOcrState.PENDING, qualityState = PageQualityState.BLACK),
-            ),
-        )
+        // 警告が付いたページでも OCR状態が消えてはいけないし、警告が別ページへ漏れてもいけない
+        showScreen(badgeSamplePages())
 
-        composeTestRule.onNodeWithText(string(R.string.page_list_warning_duplicate)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.page_list_ocr_succeeded)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.page_list_warning_black)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.page_list_ocr_pending)).assertIsDisplayed()
+        assertPageBadges(
+            tag = pageListCellTestTag(1),
+            ocrLabelRes = R.string.page_list_ocr_succeeded,
+            warningLabelRes = R.string.page_list_warning_duplicate,
+        )
+        assertPageBadges(
+            tag = pageListCellTestTag(2),
+            ocrLabelRes = R.string.page_list_ocr_pending,
+            warningLabelRes = R.string.page_list_warning_black,
+        )
+        assertPageBadges(
+            tag = pageListCellTestTag(3),
+            ocrLabelRes = R.string.page_list_ocr_failed,
+            warningLabelRes = null,
+        )
     }
 
     @Test
-    fun `警告のあるページはリストでもOCR状態と警告の両方を出す`() {
-        val viewModel =
-            showScreen(
-                listOf(
-                    page(1, ocrState = PageOcrState.STALE, qualityState = PageQualityState.DUPLICATE),
-                ),
-            )
+    fun `リストは各行の中にOCR状態と警告を併記する`() {
+        val viewModel = showScreen(badgeSamplePages())
 
         composeTestRule
             .onNodeWithContentDescription(string(R.string.page_list_view_mode_list))
             .performClick()
 
         assertEquals(PageListViewMode.LIST, viewModel.uiState.value.viewMode)
-        composeTestRule.onNodeWithText(string(R.string.page_list_warning_duplicate)).assertIsDisplayed()
-        composeTestRule.onNodeWithText(string(R.string.page_list_ocr_stale)).assertIsDisplayed()
+        assertPageBadges(
+            tag = pageListRowTestTag(1),
+            ocrLabelRes = R.string.page_list_ocr_succeeded,
+            warningLabelRes = R.string.page_list_warning_duplicate,
+        )
+        assertPageBadges(
+            tag = pageListRowTestTag(2),
+            ocrLabelRes = R.string.page_list_ocr_pending,
+            warningLabelRes = R.string.page_list_warning_black,
+        )
+        assertPageBadges(
+            tag = pageListRowTestTag(3),
+            ocrLabelRes = R.string.page_list_ocr_failed,
+            warningLabelRes = null,
+        )
     }
+
+    /**
+     * セル/行1件のスコープで、期待した OCR状態バッジと警告バッジだけが出ていることを見る。
+     * 画面全体から文言を探すと、どのページにどのバッジが付いたのかを区別できない。
+     */
+    private fun assertPageBadges(
+        tag: String,
+        ocrLabelRes: Int,
+        warningLabelRes: Int?,
+    ) {
+        val cell = composeTestRule.onNodeWithTag(tag)
+        cell.assertIsDisplayed()
+        val expected = listOfNotNull(ocrLabelRes, warningLabelRes)
+        expected.forEach { labelRes ->
+            cell.assert(showsBadgeText(string(labelRes)))
+        }
+        (OCR_LABEL_RES + WARNING_LABEL_RES)
+            .filterNot { it in expected }
+            .forEach { labelRes ->
+                cell.assert(showsBadgeText(string(labelRes)).not())
+            }
+    }
+
+    /**
+     * セル/行がそのバッジ文言を出しているか。
+     * セル/行は clickable なので子の文言が自身へ統合される（Text=[1, 重複, 完了]）が、
+     * 統合が変わっても壊れないように子孫側も見る。
+     */
+    private fun showsBadgeText(label: String): SemanticsMatcher = hasText(label) or hasAnyDescendant(hasText(label))
+
+    /** 1=完了+重複/2=待機+黒画面/3=失敗（警告なし） */
+    private fun badgeSamplePages(): List<Page> =
+        listOf(
+            page(1, ocrState = PageOcrState.SUCCEEDED, qualityState = PageQualityState.DUPLICATE),
+            page(2, ocrState = PageOcrState.PENDING, qualityState = PageQualityState.BLACK),
+            page(3, ocrState = PageOcrState.FAILED),
+        )
 
     @Test
     fun `長押しとタップで複数選択でき件数が出る`() {
@@ -335,5 +390,21 @@ class PageListScreenTest {
         /** requirements §16.1 の最低基準 */
         const val LARGE_PAGE_COUNT = 500
         const val THUMBNAIL_PIXELS = 8
+
+        /** バッジの取り違え（別ページの警告が混ざる等）を検出するための全候補 */
+        val OCR_LABEL_RES =
+            listOf(
+                R.string.page_list_ocr_pending,
+                R.string.page_list_ocr_running,
+                R.string.page_list_ocr_succeeded,
+                R.string.page_list_ocr_failed,
+                R.string.page_list_ocr_stale,
+            )
+        val WARNING_LABEL_RES =
+            listOf(
+                R.string.page_list_warning_duplicate,
+                R.string.page_list_warning_black,
+                R.string.page_list_warning_image_error,
+            )
     }
 }
