@@ -53,6 +53,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.room.runtime)
     implementation(libs.pdfbox.android)
+    implementation(libs.mlkit.text.recognition.japanese)
     kapt(libs.androidx.room.compiler)
     kaptAndroidTest(libs.androidx.room.compiler)
     testImplementation(libs.junit)
