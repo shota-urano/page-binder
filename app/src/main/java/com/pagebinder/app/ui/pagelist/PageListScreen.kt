@@ -45,6 +45,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -208,7 +209,8 @@ fun PageListScreen(
  *
  * この画面のダイアログ素材は無い（docs/design/07-page-list.md「未定事項」）ので、
  * 素材のあるごみ箱画面（docs/design/mockups/04-trash.png）の様式に合わせる:
- * 本文に対象件数、実行は Destructive（`--color-error` 塗り・白文字）、キャンセルはテキストボタン。
+ * 本文に対象件数、実行は Destructive（`--color-error` 塗り・白文字）、
+ * キャンセルは Secondary（primary 枠線・primary 文字・透明地。docs/design/system/02-components.md）。
  * ごみ箱の完全削除と違いページ削除は取り消せる（同 §3.4）ので、本文もそのとおりに書く。
  */
 @Composable
@@ -252,11 +254,19 @@ private fun PageDeleteConfirmDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            OutlinedButton(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(ButtonCornerRadius),
+                border = BorderStroke(HAIRLINE_BORDER_WIDTH, ColorPrimary),
+                colors =
+                    ButtonDefaults.outlinedButtonColors(
+                        containerColor = Color.Transparent,
+                        contentColor = ColorPrimary,
+                    ),
+            ) {
                 Text(
                     text = stringResource(R.string.page_list_delete_dialog_cancel),
                     style = MaterialTheme.typography.labelLarge,
-                    color = ColorPrimary,
                 )
             }
         },
