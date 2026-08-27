@@ -211,6 +211,67 @@ class ExportViewModelTest {
             assertTrue(viewModel.uiState.value.ocrWarningDialogVisible)
         }
 
+    // --- 続行の消費と再試行（FR-EXP-009 のゲートは書き出しごとに掛かる）---------------
+
+    @Test
+    fun `保存先を選ばずに閉じた後の再書き出しでも続行の選択を求める`() =
+        runTest {
+            val starter = RecordingExportStarter()
+            val viewModel = viewModel(project = project(ocrIncompletePageCount = 3), starter = starter)
+            viewModel.onPermissionConfirmedChange(true)
+            viewModel.onStartExportRequested()
+            viewModel.onOcrWarningContinue()
+            viewModel.onSafRequestHandled()
+
+            viewModel.onDestinationSelected(null)
+
+            assertEquals("書き出しは始まっていないこと", 0, starter.startCount)
+            assertRetryAsksOcrWarningAgain(viewModel, starter)
+        }
+
+    @Test
+    fun `書き出し成功後の再書き出しでも続行の選択を求める`() =
+        runTest {
+            val starter = RecordingExportStarter(listOf(ExportProgressEvent.Succeeded))
+            val viewModel = startedExportWithOcrWarning(starter)
+            assertEquals(ExportResultUiState.Succeeded, viewModel.uiState.value.result)
+
+            viewModel.onResultDismissed()
+
+            assertRetryAsksOcrWarningAgain(viewModel, starter)
+        }
+
+    @Test
+    fun `書き出し失敗後の再書き出しでも続行の選択を求める`() =
+        runTest {
+            val starter =
+                RecordingExportStarter(
+                    listOf(ExportProgressEvent.Failed(ExportFailureCode.GENERATION_FAILED)),
+                )
+            val viewModel = startedExportWithOcrWarning(starter)
+            assertEquals(
+                ExportResultUiState.Failed(ExportFailureGuidance.PDF_FALLBACK),
+                viewModel.uiState.value.result,
+            )
+
+            viewModel.onResultDismissed()
+
+            assertRetryAsksOcrWarningAgain(viewModel, starter)
+        }
+
+    @Test
+    fun `書き出しをキャンセルした後の再書き出しでも続行の選択を求める`() =
+        runTest {
+            val starter = RecordingExportStarter(neverCompleting = true)
+            val viewModel = startedExportWithOcrWarning(starter)
+            assertNotNull(viewModel.uiState.value.progress)
+
+            viewModel.onCancelExport()
+
+            assertRetryAsksOcrWarningAgain(viewModel, starter)
+            viewModel.onCancelExport()
+        }
+
     // --- 入力の妥当性 -----------------------------------------------------------
 
     @Test
@@ -439,6 +500,43 @@ class ExportViewModelTest {
         viewModel.onSafRequestHandled()
         viewModel.onDestinationSelected(DESTINATION_URI)
         return viewModel
+    }
+
+    /** OCR未完了ページがある書籍で、続行を選び保存先も決めて書き出しを1回始めた ViewModel */
+    private fun startedExportWithOcrWarning(starter: RecordingExportStarter): ExportViewModel {
+        val viewModel = viewModel(project = project(ocrIncompletePageCount = 3), starter = starter)
+        viewModel.onPermissionConfirmedChange(true)
+        viewModel.onStartExportRequested()
+        viewModel.onOcrWarningContinue()
+        viewModel.onSafRequestHandled()
+        viewModel.onDestinationSelected(DESTINATION_URI)
+        return viewModel
+    }
+
+    /**
+     * 2回目の書き出し要求でも続行/中止の選択が出て、続行を選ぶまで書き出しが始まらないこと。
+     * 続行を選び直せば通常どおり保存先選択→書き出しへ進めることも合わせて確かめる。
+     */
+    private fun assertRetryAsksOcrWarningAgain(
+        viewModel: ExportViewModel,
+        starter: RecordingExportStarter,
+    ) {
+        val startCountBefore = starter.startCount
+        assertFalse("続行の承認が持ち越されないこと", viewModel.uiState.value.ocrWarningAcknowledged)
+
+        viewModel.onStartExportRequested()
+
+        assertTrue("再び続行/中止の選択が出ること", viewModel.uiState.value.ocrWarningDialogVisible)
+        assertNull("続行なしに保存先選択へ進まないこと", viewModel.uiState.value.safRequest)
+        assertEquals("続行なしに書き出しが始まらないこと", startCountBefore, starter.startCount)
+
+        viewModel.onOcrWarningContinue()
+
+        assertNotNull("続行を選べば保存先選択へ進むこと", viewModel.uiState.value.safRequest)
+        assertEquals("保存先が決まるまでは始まらないこと", startCountBefore, starter.startCount)
+        viewModel.onSafRequestHandled()
+        viewModel.onDestinationSelected(DESTINATION_URI)
+        assertEquals("続行を選び直せば書き出しが始まること", startCountBefore + 1, starter.startCount)
     }
 
     /** Export Engine（`export/`）の代役。呼ばれた条件を記録し、決められた経過だけを流す */

@@ -32,6 +32,11 @@ import java.util.UUID
  *
  * [ExportStarter] を呼ぶ経路は [onDestinationSelected] だけで、そこでも3ゲートを再確認する。
  * 画面側の不具合で保存先が渡ってきても、続行を選ばない限り書き出しは始まらない。
+ *
+ * ゲート2の「続行」は**1回の書き出し試行で消費する**（FR-EXP-009 は書き出しごとの選択を要求する）。
+ * 消費は書き出しを開始する [onDestinationSelected] の1点だけで起き、
+ * 保存先を選ばずに閉じた場合は試行が成立していないので消費を取り消す。
+ * これにより成功・失敗・キャンセルのいずれで終わっても、次の書き出しでは再び続行/中止を選ばせる。
  */
 class ExportViewModel(
     project: ExportProjectSummary,
@@ -102,7 +107,7 @@ class ExportViewModel(
         mutableUiState.update { it.copy(ocrWarningDialogVisible = true) }
     }
 
-    /** 続行を選んだ。ここで初めて書き出しへ進める */
+    /** 続行を選んだ。ここで初めて書き出しへ進める（承認は今回の書き出し1回分） */
     fun onOcrWarningContinue() {
         mutableUiState.update {
             it.copy(ocrWarningAcknowledged = true, ocrWarningDialogVisible = false)
@@ -152,11 +157,17 @@ class ExportViewModel(
     }
 
     /**
-     * SAF の結果。[uri] が null なら利用者が保存先を選ばずに閉じたので何もしない。
+     * SAF の結果。[uri] が null なら利用者が保存先を選ばずに閉じたので書き出しを始めない。
+     * このとき OCR未完了警告の承認も取り消し、次の書き出しで再び続行/中止を選ばせる（FR-EXP-009）。
+     *
      * 書き出しを実際に開始する唯一の場所であり、ここでもゲートを再確認する。
+     * 開始と同時に承認を消費するので、成功・失敗・キャンセルのどれで終わっても承認は残らない。
      */
     fun onDestinationSelected(uri: String?) {
-        if (uri.isNullOrBlank()) return
+        if (uri.isNullOrBlank()) {
+            mutableUiState.update { it.copy(ocrWarningAcknowledged = false) }
+            return
+        }
         val state = mutableUiState.value
         if (!state.canStartExport) return
         val pageRange = state.resolvedPageRange ?: return
@@ -174,6 +185,8 @@ class ExportViewModel(
             it.copy(
                 progress = ExportProgressUiState(ExportProgressPhase.QUEUED, 0, 1),
                 result = null,
+                // 「続行」はこの試行で消費する。次の書き出しは再びゲート2に掛かる（FR-EXP-009）
+                ocrWarningAcknowledged = false,
             )
         }
         exportJob?.cancel()

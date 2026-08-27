@@ -80,7 +80,10 @@ data class ExportUiState(
     val ocrIncompletePageCount: Int = 0,
     /** 続行/中止を選ばせるダイアログの表示 */
     val ocrWarningDialogVisible: Boolean = false,
-    /** 「続行」が選ばれたか。false の間は書き出しを開始しない（FR-EXP-009） */
+    /**
+     * 今回の書き出しについて「続行」が選ばれたか。false の間は書き出しを開始しない（FR-EXP-009）。
+     * 書き出し1回分の承認であり、開始時に消費される（[ExportViewModel.onDestinationSelected]）。
+     */
     val ocrWarningAcknowledged: Boolean = false,
     val consent: ExportConsentUiState = ExportConsentUiState(),
     val safRequest: ExportSafRequest? = null,
