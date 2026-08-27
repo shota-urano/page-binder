@@ -80,7 +80,6 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.pagebinder.app.R
 import com.pagebinder.app.domain.PageOcrState
 import com.pagebinder.app.ui.pagelist.PageStatusBadge
@@ -654,7 +653,9 @@ private fun OcrEditTextField(
             if (updated.text != uiState.draftText) onTextChange(updated.text)
         },
         enabled = !uiState.saving,
-        textStyle = MaterialTheme.typography.bodyLarge.copy(color = ColorText, lineHeight = BODY_LINE_HEIGHT),
+        // 本文16sp・行間はテーマの bodyLarge（16sp/24sp）のまま使う。
+        // docs/design/10-ocr-edit.md の「行間広め」は素材の記述で、値の正本は docs/design/system/01-tokens.md
+        textStyle = MaterialTheme.typography.bodyLarge.copy(color = ColorText),
         cursorBrush = SolidColor(ColorPrimary),
         visualTransformation = transformation,
         modifier = modifier.testTag(OCR_EDIT_TEXT_TEST_TAG),
@@ -736,7 +737,7 @@ private fun OcrEditFooter(
                 color = if (uiState.canRevert) ColorPrimary else ColorPrimary.copy(alpha = DISABLED_ALPHA),
             )
         }
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.width(SpaceUnit))
         val interactionSource = remember { MutableInteractionSource() }
         val pressed by interactionSource.collectIsPressedAsState()
         Button(
@@ -751,7 +752,9 @@ private fun OcrEditFooter(
                     disabledContainerColor = ColorPrimary.copy(alpha = DISABLED_ALPHA),
                     disabledContentColor = Color.White.copy(alpha = DISABLED_ALPHA),
                 ),
-            modifier = Modifier.width(SAVE_BUTTON_WIDTH).heightIn(min = MinTouchTarget),
+            // 幅は残りの空きを取る。モックの見え方（右側の広い Primary ボタン）を
+            // 固定幅の目測値でなく行の配分で作る
+            modifier = Modifier.weight(1f).heightIn(min = MinTouchTarget),
         ) {
             Text(
                 text = stringResource(R.string.ocr_edit_save),
@@ -869,11 +872,11 @@ private const val IMAGE_DECODE_SCALE = 1.5f
 private const val CURRENT_MATCH_ALPHA = 0.30f
 private const val MATCH_ALPHA = 0.35f
 
-private val BADGE_ICON_SIZE = 16.dp
-private val SPLIT_HANDLE_HEIGHT = 24.dp
-private val SPLIT_HANDLE_BAR_WIDTH = 40.dp
-private val SPLIT_HANDLE_BAR_HEIGHT = 4.dp
-private val SAVE_BUTTON_WIDTH = 140.dp
-
-/** 本文は行間広め（docs/design/10-ocr-edit.md「本文16sp・行間広め」） */
-private val BODY_LINE_HEIGHT = 28.sp
+/**
+ * 寸法はすべて基本グリッド 8dp = [SpaceUnit] の倍数で置く（docs/design/system/01-tokens.md「余白・寸法」）。
+ * モック画像からの目測値は使わない（docs/design/00-design-overview.md「数値はトークンが正」）。
+ */
+private val BADGE_ICON_SIZE = SpaceUnit * 2
+private val SPLIT_HANDLE_HEIGHT = SpaceUnit * 3
+private val SPLIT_HANDLE_BAR_WIDTH = SpaceUnit * 5
+private val SPLIT_HANDLE_BAR_HEIGHT = SpaceUnit
