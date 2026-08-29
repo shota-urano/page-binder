@@ -35,9 +35,16 @@ class MlKitOcrGateway(
             try {
                 val sourceImageHash = withContext(preprocessingDispatcher) { prepared.bitmap.sha256() }
                 val text = recognizer.process(InputImage.fromBitmap(prepared.bitmap, 0)).awaitResult()
+                val blockOrder = OcrReadingOrderCorrector.order(text.toReadingBlocks())
+                val sourceOrder = text.textBlocks.indices.toList()
                 return OcrOutput(
-                    fullText = text.text,
-                    blocksJson = OcrBlocksJsonEncoder.encode(text, prepared.coordinateMapper),
+                    fullText =
+                        if (blockOrder == sourceOrder) {
+                            text.text
+                        } else {
+                            blockOrder.joinToString("\n") { text.textBlocks[it].text }
+                        },
+                    blocksJson = OcrBlocksJsonEncoder.encode(text, prepared.coordinateMapper, blockOrder),
                     engineVersion = ENGINE_VERSION,
                     sourceImageHash = sourceImageHash,
                 )
@@ -52,6 +59,18 @@ class MlKitOcrGateway(
     }
 
     override fun close() = recognizer.close()
+
+    private fun Text.toReadingBlocks(): List<OcrReadingBlock> =
+        textBlocks.mapIndexed { index, block ->
+            OcrReadingBlock(
+                sourceIndex = index,
+                rect = block.boundingBox.toPixelRect(),
+                lineRects = block.lines.map { it.boundingBox.toPixelRect() },
+            )
+        }
+
+    private fun android.graphics.Rect?.toPixelRect(): OcrPixelRect =
+        this?.let { OcrPixelRect(it.left, it.top, it.right, it.bottom) } ?: OcrPixelRect(0, 0, 0, 0)
 
     private suspend fun Task<Text>.awaitResult(): Text =
         suspendCancellableCoroutine { continuation ->

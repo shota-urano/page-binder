@@ -136,6 +136,8 @@ abstract class PageBinderDatabase : RoomDatabase() {
 
     abstract fun ocrJobDao(): OcrJobDao
 
+    abstract fun ocrResultDao(): OcrResultDao
+
     abstract fun exportRecordDao(): ExportRecordDao
 }
 

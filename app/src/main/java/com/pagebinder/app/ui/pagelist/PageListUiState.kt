@@ -51,6 +51,40 @@ data class PageListItemUiState(
 }
 
 /**
+ * 削除確認ダイアログの表示状態。
+ *
+ * 件数は必ず持つ（docs/specs/08-page-editing.md §6「削除確認で件数を必ず表示。確認なしの複数削除を行わない」、
+ * docs/design/system/02-components.md「破壊操作の確認は対象情報（件数・容量）を必ず本文に含める」）。
+ */
+data class PageDeleteConfirmationUiState(
+    val pageCount: Int,
+)
+
+/**
+ * 取り消せる直前の1操作（docs/specs/08-page-editing.md §3.4。履歴の深さは直前1操作で確定）。
+ *
+ * この画面が行う編集は削除と並べ替えの2つなので、取り消し案内もこの2つだけを表す。
+ */
+sealed interface PageListUndoableEdit {
+    /** 削除したページ数。取り消しの案内文に出す */
+    data class Delete(
+        val pageCount: Int,
+    ) : PageListUndoableEdit
+
+    data object Reorder : PageListUndoableEdit
+}
+
+/**
+ * 編集操作の失敗（docs/specs/08-page-editing.md §6）。
+ * 失敗時は一覧を読み直して UI 状態を元へ戻したうえで、これを併せて表示する。
+ */
+enum class PageListOperationError {
+    DELETE,
+    REORDER,
+    UNDO,
+}
+
+/**
  * ページ一覧画面の UiState（docs/design/07-page-list.md / docs/specs/08-page-editing.md §3.1）。
  *
  * 画面に出す値はすべてここから描く。モックのサンプルデータ（書籍名・本文）は保持しない
@@ -64,6 +98,12 @@ data class PageListUiState(
     /** sequence 昇順のページ全件 */
     val pages: List<PageListItemUiState> = emptyList(),
     val selectedPageIds: Set<UUID> = emptySet(),
+    /** 表示中なら削除確認ダイアログを出す。null は非表示 */
+    val deleteConfirmation: PageDeleteConfirmationUiState? = null,
+    /** 削除の実行中。二重の削除要求を受け付けない */
+    val deleting: Boolean = false,
+    val undoableEdit: PageListUndoableEdit? = null,
+    val operationError: PageListOperationError? = null,
 ) {
     /** 選択モード中か。1件でも選ばれていれば選択モードとし、選択モードバーへ切り替える */
     val selectionMode: Boolean
@@ -90,6 +130,16 @@ data class PageListUiState(
     /** 絞り込みの結果として0件になった */
     val emptyByFilter: Boolean
         get() = !loading && !loadFailed && pages.isNotEmpty() && visiblePages.isEmpty()
+
+    /**
+     * ドラッグ並べ替えのつまみを出すか（docs/specs/08-page-editing.md §3.2 FR-EDT-002）。
+     *
+     * 絞り込み中は一部のページしか見えておらず、書籍全体の順序を確定できないので受け付けない
+     * （PageRepository.reorder は書籍の全ページをちょうど1回ずつ含む並びを要求する）。
+     * 選択モード中もアプリバーが削除の文脈になっているので出さない。
+     */
+    val reorderEnabled: Boolean
+        get() = !loadFailed && !selectionMode && filter == PageListFilter.ALL && pages.size > 1
 
     fun isSelected(pageId: UUID): Boolean = pageId in selectedPageIds
 }

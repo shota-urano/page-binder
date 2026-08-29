@@ -8,13 +8,15 @@ internal object OcrBlocksJsonEncoder {
     fun encode(
         text: Text,
         mapper: OcrCoordinateMapper,
+        blockOrder: List<Int> = text.textBlocks.indices.toList(),
     ): String =
         JSONObject()
             .put("schemaVersion", SCHEMA_VERSION)
             .put(
                 "blocks",
                 JSONArray().apply {
-                    text.textBlocks.forEachIndexed { blockIndex, block ->
+                    blockOrder.forEachIndexed { blockIndex, sourceIndex ->
+                        val block = text.textBlocks[sourceIndex]
                         put(
                             JSONObject()
                                 .put("index", blockIndex)
