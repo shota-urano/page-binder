@@ -5,9 +5,12 @@ import android.graphics.BitmapFactory
 import android.graphics.BitmapRegionDecoder
 import android.graphics.Matrix
 import android.graphics.Rect
-import com.pagebinder.app.domain.OcrCrop
 import com.pagebinder.app.domain.OcrInput
 import com.pagebinder.app.domain.OcrInputException
+import com.pagebinder.app.image.ImageCoordinateTransformer
+import com.pagebinder.app.image.ImagePixelRect
+import com.pagebinder.app.image.ImagePoint
+import com.pagebinder.app.image.ImageRect
 import java.io.IOException
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -39,6 +42,20 @@ internal class OcrCoordinateMapper(
     private val preparedWidth: Int,
     private val preparedHeight: Int,
 ) {
+    private val rotatedWidth = if (rotationDegrees % 180 == 0) decodedWidth else decodedHeight
+    private val rotatedHeight = if (rotationDegrees % 180 == 0) decodedHeight else decodedWidth
+
+    private val coordinates =
+        ImageCoordinateTransformer.create(
+            sourceWidth = decodedWidth,
+            sourceHeight = decodedHeight,
+            rotationDegrees = rotationDegrees,
+            cropLeft = cropLeft.toFloat() / rotatedWidth,
+            cropTop = cropTop.toFloat() / rotatedHeight,
+            cropRight = (cropLeft + croppedWidth).toFloat() / rotatedWidth,
+            cropBottom = (cropTop + croppedHeight).toFloat() / rotatedHeight,
+        )
+
     fun toOriginal(rect: OcrPixelRect): OcrPixelRect {
         val corners =
             listOf(
@@ -56,16 +73,13 @@ internal class OcrCoordinateMapper(
     }
 
     private fun toOriginal(point: OcrPoint): OcrPoint {
-        val rotatedX = point.x * croppedWidth / preparedWidth + cropLeft
-        val rotatedY = point.y * croppedHeight / preparedHeight + cropTop
         val decoded =
-            when (rotationDegrees) {
-                0 -> OcrPoint(rotatedX, rotatedY)
-                90 -> OcrPoint(rotatedY, decodedHeight - rotatedX)
-                180 -> OcrPoint(decodedWidth - rotatedX, decodedHeight - rotatedY)
-                270 -> OcrPoint(decodedWidth - rotatedY, rotatedX)
-                else -> error("Rotation was validated before coordinate mapping")
-            }
+            coordinates.croppedToSource(
+                ImagePoint(
+                    x = point.x * croppedWidth / preparedWidth,
+                    y = point.y * croppedHeight / preparedHeight,
+                ),
+            )
         return OcrPoint(
             x = decoded.x * originalWidth / decodedWidth,
             y = decoded.y * originalHeight / decodedHeight,
@@ -110,10 +124,27 @@ internal object OcrImagePreprocessor {
             throw OcrInputException("OCR image could not be decoded")
         }
 
-        val rotatedWidth = if (input.rotationDegrees % 180 == 0) bounds.outWidth else bounds.outHeight
-        val rotatedHeight = if (input.rotationDegrees % 180 == 0) bounds.outHeight else bounds.outWidth
-        val cropRect = input.crop.toPixelRect(rotatedWidth, rotatedHeight)
-        val sourceRegion = cropRect.toSourceRect(input.rotationDegrees, bounds.outWidth, bounds.outHeight)
+        val coordinates =
+            ImageCoordinateTransformer.create(
+                sourceWidth = bounds.outWidth,
+                sourceHeight = bounds.outHeight,
+                rotationDegrees = input.rotationDegrees,
+                cropLeft = input.crop.left,
+                cropTop = input.crop.top,
+                cropRight = input.crop.right,
+                cropBottom = input.crop.bottom,
+            )
+        val cropRect = coordinates.enclosingPixelCrop().toOcrRect()
+        val sourceRegion =
+            coordinates
+                .rotatedToSource(
+                    ImageRect(
+                        cropRect.left.toFloat(),
+                        cropRect.top.toFloat(),
+                        cropRect.right.toFloat(),
+                        cropRect.bottom.toFloat(),
+                    ),
+                ).toAndroidRect(bounds.outWidth, bounds.outHeight)
         val options =
             BitmapFactory.Options().apply {
                 inSampleSize = sampleSize(cropRect.right - cropRect.left, cropRect.bottom - cropRect.top)
@@ -176,29 +207,18 @@ internal object OcrImagePreprocessor {
         return result
     }
 
-    private fun OcrCrop.toPixelRect(
-        width: Int,
-        height: Int,
-    ): OcrPixelRect {
-        val pixelLeft = floor(left * width).toInt().coerceIn(0, width - 1)
-        val pixelTop = floor(top * height).toInt().coerceIn(0, height - 1)
-        val pixelRight = ceil(right * width).toInt().coerceIn(pixelLeft + 1, width)
-        val pixelBottom = ceil(bottom * height).toInt().coerceIn(pixelTop + 1, height)
-        return OcrPixelRect(pixelLeft, pixelTop, pixelRight, pixelBottom)
-    }
+    private fun ImagePixelRect.toOcrRect() = OcrPixelRect(left, top, right, bottom)
 
-    private fun OcrPixelRect.toSourceRect(
-        rotationDegrees: Int,
+    private fun ImageRect.toAndroidRect(
         sourceWidth: Int,
         sourceHeight: Int,
-    ): Rect =
-        when (rotationDegrees) {
-            0 -> Rect(left, top, right, bottom)
-            90 -> Rect(top, sourceHeight - right, bottom, sourceHeight - left)
-            180 -> Rect(sourceWidth - right, sourceHeight - bottom, sourceWidth - left, sourceHeight - top)
-            270 -> Rect(sourceWidth - bottom, left, sourceWidth - top, right)
-            else -> error("Rotation was validated before preprocessing")
-        }
+    ): Rect {
+        val pixelLeft = floor(left).toInt().coerceIn(0, sourceWidth - 1)
+        val pixelTop = floor(top).toInt().coerceIn(0, sourceHeight - 1)
+        val pixelRight = ceil(right).toInt().coerceIn(pixelLeft + 1, sourceWidth)
+        val pixelBottom = ceil(bottom).toInt().coerceIn(pixelTop + 1, sourceHeight)
+        return Rect(pixelLeft, pixelTop, pixelRight, pixelBottom)
+    }
 
     private fun Bitmap.replaceWithRotated(degrees: Int): Bitmap {
         val replacement =
