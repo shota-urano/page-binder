@@ -49,4 +49,50 @@ class OcrCoordinateMapperTest {
             mapper.toOriginal(OcrPixelRect(left = -10, top = -10, right = 1010, bottom = 510)),
         )
     }
+
+    @Test
+    fun `maps 180 degree rotation with crop back to original pixels`() {
+        val mapper =
+            OcrCoordinateMapper(
+                originalWidth = 100,
+                originalHeight = 200,
+                decodedWidth = 100,
+                decodedHeight = 200,
+                rotationDegrees = 180,
+                cropLeft = 10,
+                cropTop = 30,
+                croppedWidth = 60,
+                croppedHeight = 120,
+                preparedWidth = 30,
+                preparedHeight = 60,
+            )
+
+        assertEquals(
+            OcrPixelRect(left = 40, top = 70, right = 80, bottom = 150),
+            mapper.toOriginal(OcrPixelRect(left = 5, top = 10, right = 25, bottom = 50)),
+        )
+    }
+
+    @Test
+    fun `maps 270 degree rotation with crop back to original pixels`() {
+        val mapper =
+            OcrCoordinateMapper(
+                originalWidth = 100,
+                originalHeight = 200,
+                decodedWidth = 100,
+                decodedHeight = 200,
+                rotationDegrees = 270,
+                cropLeft = 30,
+                cropTop = 15,
+                croppedWidth = 120,
+                croppedHeight = 60,
+                preparedWidth = 60,
+                preparedHeight = 30,
+            )
+
+        assertEquals(
+            OcrPixelRect(left = 35, top = 50, right = 75, bottom = 130),
+            mapper.toOriginal(OcrPixelRect(left = 10, top = 5, right = 50, bottom = 25)),
+        )
+    }
 }

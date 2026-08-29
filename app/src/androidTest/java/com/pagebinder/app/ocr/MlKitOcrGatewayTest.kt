@@ -101,6 +101,54 @@ class MlKitOcrGatewayTest {
         }
     }
 
+    @Test
+    fun preprocessingApplies180DegreeRotationThenNonDefaultCrop() {
+        val source = patternedBitmap(width = 10, height = 8)
+        val encoded = source.toPng()
+
+        val prepared =
+            OcrImagePreprocessor.prepare(
+                OcrInput(
+                    image = OcrImageSource { ByteArrayInputStream(encoded) },
+                    rotationDegrees = 180,
+                    crop = OcrCrop(left = 0.2f, top = 0.25f, right = 0.8f, bottom = 0.75f),
+                ),
+            )
+        try {
+            assertEquals(6, prepared.bitmap.width)
+            assertEquals(4, prepared.bitmap.height)
+            assertEquals(source.getPixel(7, 5), prepared.bitmap.getPixel(0, 0))
+            assertEquals(source.getPixel(2, 2), prepared.bitmap.getPixel(5, 3))
+        } finally {
+            prepared.bitmap.recycle()
+            source.recycle()
+        }
+    }
+
+    @Test
+    fun preprocessingApplies270DegreeRotationThenNonDefaultCrop() {
+        val source = patternedBitmap(width = 10, height = 8)
+        val encoded = source.toPng()
+
+        val prepared =
+            OcrImagePreprocessor.prepare(
+                OcrInput(
+                    image = OcrImageSource { ByteArrayInputStream(encoded) },
+                    rotationDegrees = 270,
+                    crop = OcrCrop(left = 0.25f, top = 0.2f, right = 0.75f, bottom = 0.8f),
+                ),
+            )
+        try {
+            assertEquals(4, prepared.bitmap.width)
+            assertEquals(6, prepared.bitmap.height)
+            assertEquals(source.getPixel(7, 2), prepared.bitmap.getPixel(0, 0))
+            assertEquals(source.getPixel(2, 5), prepared.bitmap.getPixel(3, 5))
+        } finally {
+            prepared.bitmap.recycle()
+            source.recycle()
+        }
+    }
+
     private fun JSONArray.assertIndexedSchema(
         originalWidth: Int,
         originalHeight: Int,
@@ -154,6 +202,18 @@ class MlKitOcrGatewayTest {
                 }
             canvas.drawText("PageBinder OCR 構造化結果", 120f, 500f, paint)
             canvas.drawText("日本語の文字座標を保存します", 120f, 640f, paint)
+        }
+
+    private fun patternedBitmap(
+        width: Int,
+        height: Int,
+    ): Bitmap =
+        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
+            for (y in 0 until height) {
+                for (x in 0 until width) {
+                    setPixel(x, y, Color.rgb(x * 20, y * 30, (x + y) * 10))
+                }
+            }
         }
 
     private fun Bitmap.rotate(degrees: Int): Bitmap =
