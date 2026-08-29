@@ -1,7 +1,6 @@
 package com.pagebinder.app.image
 
 import android.graphics.Bitmap
-import android.graphics.Color
 
 data class BitmapQualityResult(
     /** Mean BT.601 luma on the 0..255 scale. */
@@ -55,15 +54,5 @@ object BitmapQualityDetector {
         )
     }
 
-    private fun Int.luminance(): Double =
-        (
-            RED_LUMINANCE_WEIGHT * Color.red(this) +
-                GREEN_LUMINANCE_WEIGHT * Color.green(this) +
-                BLUE_LUMINANCE_WEIGHT * Color.blue(this)
-        ) / LUMINANCE_WEIGHT_SCALE
-
-    private const val RED_LUMINANCE_WEIGHT = 299
-    private const val GREEN_LUMINANCE_WEIGHT = 587
-    private const val BLUE_LUMINANCE_WEIGHT = 114
-    private const val LUMINANCE_WEIGHT_SCALE = 1_000.0
+    private fun Int.luminance(): Double = bt601Luminance()
 }
