@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import com.pagebinder.app.domain.Page
 import com.pagebinder.app.domain.PageCrop
+import com.pagebinder.app.domain.PageCropScope
 import com.pagebinder.app.domain.PageOcrState
 import com.pagebinder.app.domain.PageQualityState
 import com.pagebinder.app.domain.PageRepository
@@ -139,14 +140,7 @@ abstract class PageDao {
         crop: PageCrop,
     ) {
         val page = findById(pageId) ?: throw PageRepositoryException.PageNotFound(UUID.fromString(pageId))
-        if (
-            page.cropLeft == crop.left &&
-            page.cropTop == crop.top &&
-            page.cropRight == crop.right &&
-            page.cropBottom == crop.bottom
-        ) {
-            return
-        }
+        if (page.hasCrop(crop)) return
         check(
             updateCropAndMarkStale(
                 id = pageId,
@@ -156,15 +150,50 @@ abstract class PageDao {
                 bottom = crop.bottom,
             ) == 1,
         ) { "Page crop update did not affect one row" }
-        lastUndoAction =
-            PageUndoAction.Crop(
-                pageId = pageId,
-                left = page.cropLeft,
-                top = page.cropTop,
-                right = page.cropRight,
-                bottom = page.cropBottom,
-                ocrState = page.ocrState,
-            )
+        lastUndoAction = page.toCropUndoAction()
+    }
+
+    /**
+     * Stores rotation and crop as one edit. The crop reaches either the opened page alone or every
+     * page of its project, and the whole write runs in a single transaction, so a failure on any
+     * target rolls back the others. One undo entry covers every row the edit touched.
+     */
+    @Transaction
+    open suspend fun updatePageEdit(
+        pageId: String,
+        rotation: Int,
+        crop: PageCrop,
+        projectWideCrop: Boolean,
+    ): Int {
+        val page = findById(pageId) ?: throw PageRepositoryException.PageNotFound(UUID.fromString(pageId))
+        val cropTargets = if (projectWideCrop) findByProject(page.projectId) else listOf(page)
+        val rotationChanged = page.rotation != rotation
+        val cropChanges = cropTargets.filterNot { it.hasCrop(crop) }
+        if (rotationChanged) {
+            check(updateRotationAndMarkStale(pageId, rotation) == 1) { "Page rotation update did not affect one row" }
+        }
+        cropChanges.forEach { target ->
+            check(
+                updateCropAndMarkStale(
+                    id = target.id,
+                    left = crop.left,
+                    top = crop.top,
+                    right = crop.right,
+                    bottom = crop.bottom,
+                ) == 1,
+            ) { "Page crop update did not affect one row" }
+        }
+        if (rotationChanged || cropChanges.isNotEmpty()) {
+            lastUndoAction =
+                PageUndoAction.Edit(
+                    rotation =
+                        PageUndoAction
+                            .Rotation(pageId, page.rotation, page.ocrState)
+                            .takeIf { rotationChanged },
+                    crops = cropChanges.map(PageEntity::toCropUndoAction),
+                )
+        }
+        return cropTargets.size
     }
 
     @Transaction
@@ -178,26 +207,35 @@ abstract class PageDao {
                 insertAll(action.deletedPages)
                 assignFinalSequences(action.orderedPageIds)
             }
-            is PageUndoAction.Rotation -> {
-                check(restoreRotation(action.pageId, action.rotation, action.ocrState) == 1) {
-                    "Page rotation restore did not affect one row"
-                }
-            }
-            is PageUndoAction.Crop -> {
-                check(
-                    restoreCrop(
-                        id = action.pageId,
-                        left = action.left,
-                        top = action.top,
-                        right = action.right,
-                        bottom = action.bottom,
-                        ocrState = action.ocrState,
-                    ) == 1,
-                ) { "Page crop restore did not affect one row" }
+            is PageUndoAction.Rotation -> restore(action)
+            is PageUndoAction.Crop -> restore(action)
+            // 1回の編集で触れた全ページを1操作として戻す（docs/specs/08-page-editing.md §3.4）
+            is PageUndoAction.Edit -> {
+                action.crops.forEach { restore(it) }
+                action.rotation?.let { restore(it) }
             }
         }
         lastUndoAction = null
         return true
+    }
+
+    private suspend fun restore(action: PageUndoAction.Rotation) {
+        check(restoreRotation(action.pageId, action.rotation, action.ocrState) == 1) {
+            "Page rotation restore did not affect one row"
+        }
+    }
+
+    private suspend fun restore(action: PageUndoAction.Crop) {
+        check(
+            restoreCrop(
+                id = action.pageId,
+                left = action.left,
+                top = action.top,
+                right = action.right,
+                bottom = action.bottom,
+                ocrState = action.ocrState,
+            ) == 1,
+        ) { "Page crop restore did not affect one row" }
     }
 
     private suspend fun rewriteSequences(orderedPageIds: List<String>) {
@@ -260,6 +298,21 @@ class RoomPageRepository(
         dao.updateCrop(pageId.toString(), crop)
     }
 
+    override suspend fun updatePageEdit(
+        pageId: UUID,
+        rotation: Int,
+        crop: PageCrop,
+        cropScope: PageCropScope,
+    ): Int {
+        require(rotation in VALID_PAGE_ROTATIONS) { "Page rotation must be 0, 90, 180, or 270 degrees" }
+        return dao.updatePageEdit(
+            pageId = pageId.toString(),
+            rotation = rotation,
+            crop = crop,
+            projectWideCrop = cropScope == PageCropScope.PROJECT,
+        )
+    }
+
     override suspend fun undoLastEdit(): Boolean = dao.undoLastEdit()
 }
 
@@ -288,7 +341,29 @@ private sealed interface PageUndoAction {
         val bottom: Float,
         val ocrState: String,
     ) : PageUndoAction
+
+    /**
+     * One rotation + crop edit, however many pages its crop reached. Book-wide crop application
+     * (FR-IMG-005/006) stays a single undoable operation this way.
+     */
+    data class Edit(
+        val rotation: Rotation?,
+        val crops: List<Crop>,
+    ) : PageUndoAction
 }
+
+private fun PageEntity.hasCrop(crop: PageCrop): Boolean =
+    cropLeft == crop.left && cropTop == crop.top && cropRight == crop.right && cropBottom == crop.bottom
+
+private fun PageEntity.toCropUndoAction() =
+    PageUndoAction.Crop(
+        pageId = id,
+        left = cropLeft,
+        top = cropTop,
+        right = cropRight,
+        bottom = cropBottom,
+        ocrState = ocrState,
+    )
 
 private fun Page.toEntity() =
     PageEntity(

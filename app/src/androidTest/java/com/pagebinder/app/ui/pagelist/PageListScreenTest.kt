@@ -25,6 +25,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.pagebinder.app.R
 import com.pagebinder.app.domain.Page
 import com.pagebinder.app.domain.PageCrop
+import com.pagebinder.app.domain.PageCropScope
 import com.pagebinder.app.domain.PageOcrState
 import com.pagebinder.app.domain.PageQualityState
 import com.pagebinder.app.domain.PageRepository
@@ -544,6 +545,13 @@ class PageListScreenTest {
             pageId: UUID,
             crop: PageCrop,
         ) = throw UnsupportedOperationException()
+
+        override suspend fun updatePageEdit(
+            pageId: UUID,
+            rotation: Int,
+            crop: PageCrop,
+            cropScope: PageCropScope,
+        ): Int = throw UnsupportedOperationException()
 
         override suspend fun undoLastEdit(): Boolean {
             val snapshot = undoSnapshot ?: return false

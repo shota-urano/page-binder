@@ -21,6 +21,7 @@ import com.pagebinder.app.domain.OcrResultRepository
 import com.pagebinder.app.domain.OcrState
 import com.pagebinder.app.domain.Page
 import com.pagebinder.app.domain.PageCrop
+import com.pagebinder.app.domain.PageCropScope
 import com.pagebinder.app.domain.PageOcrState
 import com.pagebinder.app.domain.PageQualityState
 import com.pagebinder.app.domain.PageRepository
@@ -93,6 +94,13 @@ class OcrEditScreenPreviewActivity : ComponentActivity() {
             pageId: UUID,
             crop: PageCrop,
         ) = throw UnsupportedOperationException()
+
+        override suspend fun updatePageEdit(
+            pageId: UUID,
+            rotation: Int,
+            crop: PageCrop,
+            cropScope: PageCropScope,
+        ): Int = throw UnsupportedOperationException()
 
         override suspend fun undoLastEdit(): Boolean = throw UnsupportedOperationException()
     }

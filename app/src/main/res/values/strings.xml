@@ -142,4 +142,39 @@
     <string name="ocr_edit_load_failed">OCR結果を読み込めませんでした</string>
     <string name="ocr_edit_reload">再読み込み</string>
     <string name="ocr_edit_image_retry">画像を読み込み直す</string>
+
+    <!-- 回転・切り取り編集画面（docs/design/08-page-edit.md / docs/specs/08-page-editing.md §3.2）
+         ページ番号は UiState から描く。モックの「12」はサンプル -->
+    <string name="page_edit_title">ページ %1$d を編集</string>
+    <string name="page_edit_close">編集を閉じる</string>
+    <string name="page_edit_save">保存</string>
+    <string name="page_edit_non_destructive">元の画像は変更されません</string>
+    <string name="page_edit_rotate">90°回転</string>
+    <string name="page_edit_undo">元に戻す</string>
+    <string name="page_edit_apply_to_all">この書籍の全ページに同じ切り取りを適用</string>
+    <string name="page_edit_crop_handle_top_left">切り取り範囲の左上</string>
+    <string name="page_edit_crop_handle_top">切り取り範囲の上辺</string>
+    <string name="page_edit_crop_handle_top_right">切り取り範囲の右上</string>
+    <string name="page_edit_crop_handle_left">切り取り範囲の左辺</string>
+    <string name="page_edit_crop_handle_right">切り取り範囲の右辺</string>
+    <string name="page_edit_crop_handle_bottom_left">切り取り範囲の左下</string>
+    <string name="page_edit_crop_handle_bottom">切り取り範囲の下辺</string>
+    <string name="page_edit_crop_handle_bottom_right">切り取り範囲の右下</string>
+    <string name="page_edit_apply_dialog_title">全ページに切り取りを適用しますか?</string>
+    <string name="page_edit_apply_dialog_message">この書籍の%1$d件のページに同じ切り取り範囲を適用します。元の画像は変更されませんが、各ページのOCRは再実行が必要になります。</string>
+    <string name="page_edit_apply_dialog_confirm">適用する</string>
+    <string name="page_edit_apply_dialog_cancel">キャンセル</string>
+    <string name="page_edit_discard_dialog_title">編集を破棄しますか?</string>
+    <string name="page_edit_discard_dialog_message">保存していない回転・切り取りの変更を破棄して画面を閉じます。元の画像は変更されません。</string>
+    <string name="page_edit_discard_dialog_confirm">破棄して閉じる</string>
+    <string name="page_edit_discard_dialog_cancel">編集を続ける</string>
+    <string name="page_edit_message_saved">回転・切り取りを保存しました。このページのOCRは再実行が必要です。</string>
+    <string name="page_edit_message_saved_to_all">%1$d件のページに切り取りを適用しました。各ページのOCRは再実行が必要です。</string>
+    <string name="page_edit_message_save_failed">保存できませんでした。もう一度お試しください。</string>
+    <string name="page_edit_message_undone">直前の編集を取り消しました。</string>
+    <string name="page_edit_message_undo_failed">取り消せませんでした。もう一度お試しください。</string>
+    <string name="page_edit_message_dismiss">閉じる</string>
+    <string name="page_edit_load_failed">ページを読み込めませんでした</string>
+    <string name="page_edit_reload">再読み込み</string>
+    <string name="page_edit_image_retry">画像を読み込み直す</string>
 </resources>

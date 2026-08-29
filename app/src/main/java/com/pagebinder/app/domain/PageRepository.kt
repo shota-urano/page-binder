@@ -63,6 +63,12 @@ data class Page(
 
 val VALID_PAGE_ROTATIONS = setOf(0, 90, 180, 270)
 
+/** Pages a crop edit is applied to (FR-IMG-005/006: per page, or the whole book at once). */
+enum class PageCropScope {
+    PAGE,
+    PROJECT,
+}
+
 /** Persistence boundary for page data and atomic page-editing operations. */
 interface PageRepository {
     suspend fun insert(page: Page)
@@ -94,6 +100,20 @@ interface PageRepository {
         pageId: UUID,
         crop: PageCrop,
     )
+
+    /**
+     * Stores the rotation of [pageId] together with [crop] for every page selected by [cropScope]
+     * as a single atomic edit: either every affected row changes or none does, and one undo entry
+     * covers the whole operation.
+     *
+     * @return the number of pages the crop was applied to.
+     */
+    suspend fun updatePageEdit(
+        pageId: UUID,
+        rotation: Int,
+        crop: PageCrop,
+        cropScope: PageCropScope = PageCropScope.PAGE,
+    ): Int
 
     /** Restores the state before the most recent successful page-editing operation. */
     suspend fun undoLastEdit(): Boolean
