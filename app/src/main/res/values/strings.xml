@@ -177,4 +177,31 @@
     <string name="page_edit_load_failed">ページを読み込めませんでした</string>
     <string name="page_edit_reload">再読み込み</string>
     <string name="page_edit_image_retry">画像を読み込み直す</string>
+
+    <!-- 重複候補比較・黒画面候補一覧（docs/design/09-duplicate-review.md /
+         docs/specs/08-page-editing.md §3.2 FR-EDT-006・FR-EDT-007）
+         組数・件数・ページ番号は UiState から描く。モックの「1組」「2件」「7/8/15/23」はサンプル -->
+    <string name="duplicate_review_title">確認が必要なページ</string>
+    <string name="duplicate_review_back">戻る</string>
+    <string name="duplicate_review_duplicate_heading">重複の候補 (%1$d組)</string>
+    <string name="duplicate_review_black_heading">黒画面の候補 (%1$d件)</string>
+    <string name="duplicate_review_page_label">ページ %1$d</string>
+    <string name="duplicate_review_keep">このページを残す</string>
+    <string name="duplicate_review_note">選ばなかったページは削除候補になります</string>
+    <string name="duplicate_review_black_reason">保護された画面の可能性があります</string>
+    <string name="duplicate_review_black_delete">削除</string>
+    <string name="duplicate_review_black_keep">残す</string>
+    <string name="duplicate_review_delete_candidates">削除候補の%1$d件を削除</string>
+    <string name="duplicate_review_delete_dialog_title">ページを削除しますか?</string>
+    <string name="duplicate_review_delete_dialog_message">%1$d件のページを削除します。削除したページは「元に戻す」で戻せます。</string>
+    <string name="duplicate_review_delete_dialog_confirm">削除</string>
+    <string name="duplicate_review_delete_dialog_cancel">キャンセル</string>
+    <string name="duplicate_review_undo_delete">%1$d件のページを削除しました</string>
+    <string name="duplicate_review_undo_action">元に戻す</string>
+    <string name="duplicate_review_message_dismiss">閉じる</string>
+    <string name="duplicate_review_delete_failed">ページを削除できませんでした</string>
+    <string name="duplicate_review_undo_failed">直前の操作を取り消せませんでした</string>
+    <string name="duplicate_review_empty">確認が必要なページはありません</string>
+    <string name="duplicate_review_load_failed">ページを読み込めませんでした</string>
+    <string name="duplicate_review_reload">再読み込み</string>
 </resources>

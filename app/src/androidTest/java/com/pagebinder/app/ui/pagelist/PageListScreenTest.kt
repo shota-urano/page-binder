@@ -536,6 +536,13 @@ class PageListScreenTest {
                     .mapIndexed { index, page -> page.copy(sequence = index + 1) }
         }
 
+        /** この画面は重複の解消を行わないので、呼ばれたら誤り */
+        override suspend fun deleteResolvingDuplicates(
+            projectId: UUID,
+            pageIds: Set<UUID>,
+            resolvedDuplicatePageIds: Set<UUID>,
+        ) = throw UnsupportedOperationException()
+
         override suspend fun updateRotation(
             pageId: UUID,
             rotation: Int,

@@ -5,4 +5,5 @@
     <string name="page_list_preview_label">PageBinder ページ一覧プレビュー</string>
     <string name="ocr_edit_preview_label">PageBinder OCR編集プレビュー</string>
     <string name="page_edit_preview_label">PageBinder 回転・切り取りプレビュー</string>
+    <string name="duplicate_review_preview_label">PageBinder 重複・黒画面確認プレビュー</string>
 </resources>

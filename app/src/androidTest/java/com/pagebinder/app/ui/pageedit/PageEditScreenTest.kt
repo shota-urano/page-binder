@@ -277,6 +277,12 @@ class PageEditScreenTest {
             pageIds: Set<UUID>,
         ) = throw UnsupportedOperationException()
 
+        override suspend fun deleteResolvingDuplicates(
+            projectId: UUID,
+            pageIds: Set<UUID>,
+            resolvedDuplicatePageIds: Set<UUID>,
+        ) = throw UnsupportedOperationException()
+
         override suspend fun updateRotation(
             pageId: UUID,
             rotation: Int,

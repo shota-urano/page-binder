@@ -41,6 +41,12 @@ abstract class PageDao {
     @Query("DELETE FROM pages WHERE id IN (:ids)")
     protected abstract suspend fun deleteByIds(ids: List<String>): Int
 
+    @Query("UPDATE pages SET quality_state = :qualityState WHERE id = :id")
+    protected abstract suspend fun updateQualityState(
+        id: String,
+        qualityState: String,
+    ): Int
+
     @Query("UPDATE pages SET rotation = :rotation, ocr_state = 'stale' WHERE id = :id")
     protected abstract suspend fun updateRotationAndMarkStale(
         id: String,
@@ -112,15 +118,48 @@ abstract class PageDao {
         projectId: String,
         pageIds: Set<String>,
     ) {
-        if (pageIds.isEmpty()) return
-        val currentIds = findByProject(projectId).map(PageEntity::id)
-        if (!currentIds.containsAll(pageIds)) {
+        deleteAndResolveDuplicates(projectId, pageIds, emptySet())
+    }
+
+    /**
+     * Deletes [pageIds] and clears the duplicate warning of [resolvedDuplicatePageIds] in one
+     * transaction, so a failure on any row rolls back the others and a single undo entry covers
+     * both parts (docs/specs/08-page-editing.md §3.2 FR-EDT-006・§3.4).
+     */
+    @Transaction
+    open suspend fun deleteAndResolveDuplicates(
+        projectId: String,
+        pageIds: Set<String>,
+        resolvedDuplicatePageIds: Set<String>,
+    ) {
+        if (pageIds.isEmpty() && resolvedDuplicatePageIds.isEmpty()) return
+        val currentPages = findByProject(projectId)
+        val currentIds = currentPages.map(PageEntity::id)
+        if (!currentIds.containsAll(pageIds) || !currentIds.containsAll(resolvedDuplicatePageIds)) {
             throw PageRepositoryException.PagesNotInProject()
         }
-        val deletedPages = findByProject(projectId).filter { it.id in pageIds }
-        check(deleteByIds(pageIds.toList()) == pageIds.size) { "Page delete did not affect every selected row" }
-        rewriteSequences(currentIds.filterNot(pageIds::contains))
-        lastUndoAction = PageUndoAction.Delete(projectId, currentIds, deletedPages)
+        val deletedPages = currentPages.filter { it.id in pageIds }
+        // 既に重複警告が付いているページだけを戻す対象として控える（付いていなければ書き換えない）
+        val resolvedPages =
+            currentPages.filter {
+                it.id in resolvedDuplicatePageIds && it.qualityState == DUPLICATE_QUALITY_STATE
+            }
+        if (pageIds.isNotEmpty()) {
+            check(deleteByIds(pageIds.toList()) == pageIds.size) { "Page delete did not affect every selected row" }
+            rewriteSequences(currentIds.filterNot(pageIds::contains))
+        }
+        resolvedPages.forEach { page ->
+            check(updateQualityState(page.id, NORMAL_QUALITY_STATE) == 1) {
+                "Page quality state update did not affect one row"
+            }
+        }
+        lastUndoAction =
+            PageUndoAction.Delete(
+                projectId = projectId,
+                orderedPageIds = currentIds,
+                deletedPages = deletedPages,
+                resolvedQualityStates = resolvedPages.map(PageEntity::toQualityUndoAction),
+            )
     }
 
     @Transaction
@@ -202,6 +241,8 @@ abstract class PageDao {
         when (action) {
             is PageUndoAction.Reorder -> rewriteSequences(action.orderedPageIds)
             is PageUndoAction.Delete -> {
+                // 削除と一緒に消した重複警告も同じ1操作として戻す（docs/specs/08-page-editing.md §3.4）
+                action.resolvedQualityStates.forEach { restore(it) }
                 val remainingIds = findByProject(action.projectId).map(PageEntity::id)
                 stageSequences(remainingIds)
                 insertAll(action.deletedPages)
@@ -217,6 +258,12 @@ abstract class PageDao {
         }
         lastUndoAction = null
         return true
+    }
+
+    private suspend fun restore(action: PageUndoAction.Quality) {
+        check(updateQualityState(action.pageId, action.qualityState) == 1) {
+            "Page quality state restore did not affect one row"
+        }
     }
 
     private suspend fun restore(action: PageUndoAction.Rotation) {
@@ -283,6 +330,21 @@ class RoomPageRepository(
         dao.deleteAndCompact(projectId.toString(), pageIds.mapTo(mutableSetOf(), UUID::toString))
     }
 
+    override suspend fun deleteResolvingDuplicates(
+        projectId: UUID,
+        pageIds: Set<UUID>,
+        resolvedDuplicatePageIds: Set<UUID>,
+    ) {
+        require(pageIds.none(resolvedDuplicatePageIds::contains)) {
+            "A page cannot be deleted and kept by the same edit"
+        }
+        dao.deleteAndResolveDuplicates(
+            projectId = projectId.toString(),
+            pageIds = pageIds.mapTo(mutableSetOf(), UUID::toString),
+            resolvedDuplicatePageIds = resolvedDuplicatePageIds.mapTo(mutableSetOf(), UUID::toString),
+        )
+    }
+
     override suspend fun updateRotation(
         pageId: UUID,
         rotation: Int,
@@ -325,7 +387,18 @@ private sealed interface PageUndoAction {
         val projectId: String,
         val orderedPageIds: List<String>,
         val deletedPages: List<PageEntity>,
+        /** 削除と同時に消した重複警告。取り消しで一緒に戻す */
+        val resolvedQualityStates: List<Quality> = emptyList(),
     ) : PageUndoAction
+
+    /**
+     * 1ページ分の品質判定の控え。単体で取り消し操作にはならず、
+     * [Delete] の一部として戻る（重複の解消は削除と同じ1操作）。
+     */
+    data class Quality(
+        val pageId: String,
+        val qualityState: String,
+    )
 
     data class Rotation(
         val pageId: String,
@@ -351,6 +424,12 @@ private sealed interface PageUndoAction {
         val crops: List<Crop>,
     ) : PageUndoAction
 }
+
+/** 判定値は Domain の [PageQualityState] が正本。data 層でも文字列を直書きしない */
+private val DUPLICATE_QUALITY_STATE = PageQualityState.DUPLICATE.serializedName
+private val NORMAL_QUALITY_STATE = PageQualityState.NORMAL.serializedName
+
+private fun PageEntity.toQualityUndoAction() = PageUndoAction.Quality(pageId = id, qualityState = qualityState)
 
 private fun PageEntity.hasCrop(crop: PageCrop): Boolean =
     cropLeft == crop.left && cropTop == crop.top && cropRight == crop.right && cropBottom == crop.bottom

@@ -89,6 +89,29 @@ interface PageRepository {
         pageIds: Set<UUID>,
     )
 
+    /**
+     * Deletes [pageIds] and clears the duplicate warning of [resolvedDuplicatePageIds] as a single
+     * atomic edit: either every affected row changes or none does, and one undo entry covers the
+     * whole operation.
+     *
+     * Confirming a duplicate group deletes the pages the user did not keep, which leaves the kept
+     * page without the pages it was flagged against. Its `duplicate` warning then describes a
+     * relation that no longer exists, and would otherwise pair the kept page with whatever page
+     * moves next to it. Clearing that warning is part of this feature's output
+     * (docs/specs/08-page-editing.md §2「Page 属性の更新（… / qualityState）」・§3.2 FR-EDT-006),
+     * and the write goes through this repository as docs/specs/07-image-quality.md §5 requires.
+     * Deciding *whether* a page is a duplicate stays with detection (same spec §3.3); this only
+     * clears a warning the user has already acted on.
+     *
+     * Pages in [resolvedDuplicatePageIds] must belong to [projectId] and must not also be deleted.
+     * Pages that carry no duplicate warning are left untouched.
+     */
+    suspend fun deleteResolvingDuplicates(
+        projectId: UUID,
+        pageIds: Set<UUID>,
+        resolvedDuplicatePageIds: Set<UUID>,
+    )
+
     /** Updates non-destructive rotation metadata and marks prior OCR stale when it changes. */
     suspend fun updateRotation(
         pageId: UUID,

@@ -48,6 +48,78 @@ class PageRepositoryEditingTest {
         }
 
     @Test
+    fun `resolving duplicates clears the warning of the kept page and compacts the rest`() =
+        runBlocking {
+            // 重複の相手を消したら、残したページの重複警告は指す先を失う
+            // （docs/specs/08-page-editing.md §3.2 FR-EDT-006）
+            insertPages(3, duplicateIndexes = setOf(2))
+
+            repository.deleteResolvingDuplicates(
+                projectId = projectId,
+                pageIds = setOf(pageIds[1]),
+                resolvedDuplicatePageIds = setOf(pageIds[2]),
+            )
+
+            val pages = repository.findByProject(projectId)
+            assertEquals(listOf(pageIds[0], pageIds[2]), pages.map(Page::id))
+            assertEquals(listOf(1, 2), pages.map(Page::sequence))
+            assertEquals(
+                listOf(PageQualityState.NORMAL, PageQualityState.NORMAL),
+                pages.map(Page::qualityState),
+            )
+        }
+
+    @Test
+    fun `undo restores both the deleted page and the cleared duplicate warning`() =
+        runBlocking {
+            // 削除と重複の解消はひとまとめの1操作（同 §3.4。取り消しは直前1操作）
+            insertPages(3, duplicateIndexes = setOf(2))
+            val before = repository.findByProject(projectId)
+
+            repository.deleteResolvingDuplicates(
+                projectId = projectId,
+                pageIds = setOf(pageIds[1]),
+                resolvedDuplicatePageIds = setOf(pageIds[2]),
+            )
+
+            assertTrue(repository.undoLastEdit())
+            assertEquals(before, repository.findByProject(projectId))
+            assertFalse(repository.undoLastEdit())
+        }
+
+    @Test
+    fun `resolving leaves pages without a duplicate warning untouched`() =
+        runBlocking {
+            insertPages(3)
+            val before = repository.findByProject(projectId)
+
+            repository.deleteResolvingDuplicates(
+                projectId = projectId,
+                pageIds = emptySet(),
+                resolvedDuplicatePageIds = setOf(pageIds[0]),
+            )
+
+            assertEquals(before, repository.findByProject(projectId))
+        }
+
+    @Test
+    fun `a page cannot be deleted and kept by the same edit`() =
+        runBlocking {
+            insertPages(3, duplicateIndexes = setOf(2))
+
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking {
+                    repository.deleteResolvingDuplicates(
+                        projectId = projectId,
+                        pageIds = setOf(pageIds[2]),
+                        resolvedDuplicatePageIds = setOf(pageIds[2]),
+                    )
+                }
+            }
+            assertEquals(3, repository.findByProject(projectId).size)
+        }
+
+    @Test
     fun `rotation and crop changes mark OCR stale without changing source path`() =
         runBlocking {
             insertPages(2, PageOcrState.SUCCEEDED)
@@ -227,13 +299,19 @@ class PageRepositoryEditingTest {
     private suspend fun insertPages(
         count: Int,
         ocrState: PageOcrState = PageOcrState.PENDING,
+        duplicateIndexes: Set<Int> = emptySet(),
     ) {
-        repeat(count) { index -> repository.insert(page(index, ocrState)) }
+        repeat(count) { index ->
+            val qualityState =
+                if (index in duplicateIndexes) PageQualityState.DUPLICATE else PageQualityState.NORMAL
+            repository.insert(page(index, ocrState, qualityState))
+        }
     }
 
     private fun page(
         index: Int,
         ocrState: PageOcrState,
+        qualityState: PageQualityState = PageQualityState.NORMAL,
     ) = Page(
         id = pageIds[index],
         projectId = projectId,
@@ -246,7 +324,7 @@ class PageRepositoryEditingTest {
         capturedAt = Instant.parse("2026-08-27T01:02:03Z").plusSeconds(index.toLong()),
         contentHash = "content-$index",
         perceptualHash = "perceptual-$index",
-        qualityState = PageQualityState.NORMAL,
+        qualityState = qualityState,
         ocrState = ocrState,
     )
 }
@@ -298,6 +376,11 @@ private class InMemoryPageDao : PageDao() {
     ): Int = update(id) { copy(sequence = sequence) }
 
     override suspend fun deleteByIds(ids: List<String>): Int = ids.count { pages.remove(it) != null }
+
+    override suspend fun updateQualityState(
+        id: String,
+        qualityState: String,
+    ): Int = update(id) { copy(qualityState = qualityState) }
 
     override suspend fun updateRotationAndMarkStale(
         id: String,
