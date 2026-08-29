@@ -3,10 +3,10 @@ package com.pagebinder.app.image
 import android.graphics.Bitmap
 import android.graphics.Color
 
-/** Computes a 64-bit dHash for approximate image comparison without modifying the source bitmap. */
+/** Computes a 64-bit pHash for approximate image comparison without modifying the source bitmap. */
 object BitmapPerceptualHash {
     /**
-     * Returns the dHash as 16 lowercase hexadecimal characters for storage in Page.perceptualHash.
+     * Returns the pHash as 16 lowercase hexadecimal characters for storage in Page.perceptualHash.
      *
      * Scaling or pixel access failures are propagated to the caller. The source bitmap remains
      * untouched so the capture can be retried or reported as an image conversion failure.
@@ -15,23 +15,21 @@ object BitmapPerceptualHash {
         val sample =
             Bitmap.createScaledBitmap(
                 bitmap,
-                SAMPLE_WIDTH,
-                SAMPLE_HEIGHT,
+                SAMPLE_SIZE,
+                SAMPLE_SIZE,
                 true,
             )
         try {
-            val pixels = IntArray(SAMPLE_WIDTH * SAMPLE_HEIGHT)
-            sample.getPixels(pixels, 0, SAMPLE_WIDTH, 0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT)
+            val pixels = IntArray(SAMPLE_SIZE * SAMPLE_SIZE)
+            sample.getPixels(pixels, 0, SAMPLE_SIZE, 0, 0, SAMPLE_SIZE, SAMPLE_SIZE)
+            val coefficients = lowFrequencyDct(pixels)
+            val comparisonCoefficients = coefficients.drop(1).sorted()
+            val median = comparisonCoefficients[comparisonCoefficients.size / 2]
 
             var hash = 0L
-            for (y in 0 until SAMPLE_HEIGHT) {
-                val rowStart = y * SAMPLE_WIDTH
-                for (x in 0 until HASH_WIDTH) {
-                    hash = hash shl 1
-                    if (pixels[rowStart + x].luminance() > pixels[rowStart + x + 1].luminance()) {
-                        hash = hash or 1L
-                    }
-                }
+            coefficients.forEach { coefficient ->
+                hash = hash shl 1
+                if (coefficient > median) hash = hash or 1L
             }
             return java.lang.Long.toUnsignedString(hash, HEX_RADIX).padStart(HASH_HEX_LENGTH, '0')
         } finally {
@@ -65,16 +63,45 @@ object BitmapPerceptualHash {
             GREEN_LUMINANCE_WEIGHT * Color.green(this) +
             BLUE_LUMINANCE_WEIGHT * Color.blue(this)
 
-    private const val HASH_WIDTH = 8
-    private const val SAMPLE_WIDTH = HASH_WIDTH + 1
-    private const val SAMPLE_HEIGHT = 8
+    private fun lowFrequencyDct(pixels: IntArray): List<Double> {
+        return buildList(LOW_FREQUENCY_COEFFICIENT_COUNT) {
+            for (verticalFrequency in 0 until HASH_SIZE) {
+                for (horizontalFrequency in 0 until HASH_SIZE) {
+                    var coefficient = 0.0
+                    for (y in 0 until SAMPLE_SIZE) {
+                        val verticalCosine = cosineTable[y][verticalFrequency]
+                        for (x in 0 until SAMPLE_SIZE) {
+                            coefficient +=
+                                pixels[y * SAMPLE_SIZE + x].luminance() *
+                                cosineTable[x][horizontalFrequency] *
+                                verticalCosine
+                        }
+                    }
+                    add(coefficient)
+                }
+            }
+        }
+    }
+
+    private const val SAMPLE_SIZE = 32
+    private const val HASH_SIZE = 8
+    private const val LOW_FREQUENCY_COEFFICIENT_COUNT = HASH_SIZE * HASH_SIZE
     private const val HASH_HEX_LENGTH = 16
     private const val HEX_RADIX = 16
 
-    // The specification leaves this to implementation-time measurement. Android fixture
-    // calibration gives distance 1 for a localized page change and 64 for a different page;
-    // 5 keeps the former duplicate while leaving a wide boundary before the latter.
+    // Android Canvas book-page fixtures measured slight changes at [2, 0, 0] and unrelated page
+    // layouts at [28, 30, 30]. Five leaves 3 bits of headroom above the observed duplicate maximum
+    // and 23 bits below the observed unrelated-page minimum.
     private const val DUPLICATE_DISTANCE_THRESHOLD = 5
+
+    private val cosineTable =
+        Array(SAMPLE_SIZE) { position ->
+            DoubleArray(HASH_SIZE) { frequency ->
+                kotlin.math.cos(
+                    Math.PI * (2 * position + 1) * frequency / (2.0 * SAMPLE_SIZE),
+                )
+            }
+        }
 
     private const val RED_LUMINANCE_WEIGHT = 299
     private const val GREEN_LUMINANCE_WEIGHT = 587
