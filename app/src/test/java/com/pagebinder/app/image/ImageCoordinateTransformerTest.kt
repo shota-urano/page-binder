@@ -42,6 +42,52 @@ class ImageCoordinateTransformerTest {
         assertEquals(160f, transformer.croppedSize.height, TOLERANCE)
     }
 
+    @Test
+    fun `clockwise 180 degree coordinates with crop round trip`() {
+        val transformer =
+            ImageCoordinateTransformer.create(
+                sourceWidth = 200,
+                sourceHeight = 100,
+                rotationDegrees = 180,
+                cropLeft = 0.1f,
+                cropTop = 0.2f,
+                cropRight = 0.8f,
+                cropBottom = 0.9f,
+            )
+        val source = ImageRect(left = 50f, top = 30f, right = 100f, bottom = 70f)
+
+        val cropped = transformer.sourceToCropped(source)
+        val restored = transformer.croppedToSource(cropped)
+
+        assertRect(ImageRect(left = 80f, top = 10f, right = 130f, bottom = 50f), cropped)
+        assertRect(source, restored)
+        assertEquals(140f, transformer.croppedSize.width, TOLERANCE)
+        assertEquals(70f, transformer.croppedSize.height, TOLERANCE)
+    }
+
+    @Test
+    fun `clockwise 270 degree coordinates with crop round trip`() {
+        val transformer =
+            ImageCoordinateTransformer.create(
+                sourceWidth = 200,
+                sourceHeight = 100,
+                rotationDegrees = 270,
+                cropLeft = 0.2f,
+                cropTop = 0.1f,
+                cropRight = 0.9f,
+                cropBottom = 0.8f,
+            )
+        val source = ImageRect(left = 50f, top = 30f, right = 120f, bottom = 70f)
+
+        val cropped = transformer.sourceToCropped(source)
+        val restored = transformer.croppedToSource(cropped)
+
+        assertRect(ImageRect(left = 10f, top = 60f, right = 50f, bottom = 130f), cropped)
+        assertRect(source, restored)
+        assertEquals(70f, transformer.croppedSize.width, TOLERANCE)
+        assertEquals(140f, transformer.croppedSize.height, TOLERANCE)
+    }
+
     private fun assertRoundTrip(
         rotationDegrees: Int,
         expectedRotated: ImagePoint,
