@@ -2,11 +2,13 @@ package com.pagebinder.app.data
 
 import com.pagebinder.app.domain.Page
 import com.pagebinder.app.domain.PageCrop
+import com.pagebinder.app.domain.PageCropScope
 import com.pagebinder.app.domain.PageOcrState
 import com.pagebinder.app.domain.PageQualityState
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -18,7 +20,8 @@ class PageRepositoryEditingTest {
         (1..4).map { index ->
             UUID.fromString("20000000-0000-0000-0000-${index.toString().padStart(12, '0')}")
         }
-    private val repository = RoomPageRepository(InMemoryPageDao())
+    private val dao = InMemoryPageDao()
+    private val repository = RoomPageRepository(dao)
 
     @Test
     fun `reorder assigns contiguous sequences in requested order`() =
@@ -42,6 +45,78 @@ class PageRepositoryEditingTest {
             val pages = repository.findByProject(projectId)
             assertEquals(listOf(pageIds[1], pageIds[3]), pages.map(Page::id))
             assertEquals(listOf(1, 2), pages.map(Page::sequence))
+        }
+
+    @Test
+    fun `resolving duplicates clears the warning of the kept page and compacts the rest`() =
+        runBlocking {
+            // 重複の相手を消したら、残したページの重複警告は指す先を失う
+            // （docs/specs/08-page-editing.md §3.2 FR-EDT-006）
+            insertPages(3, duplicateIndexes = setOf(2))
+
+            repository.deleteResolvingDuplicates(
+                projectId = projectId,
+                pageIds = setOf(pageIds[1]),
+                resolvedDuplicatePageIds = setOf(pageIds[2]),
+            )
+
+            val pages = repository.findByProject(projectId)
+            assertEquals(listOf(pageIds[0], pageIds[2]), pages.map(Page::id))
+            assertEquals(listOf(1, 2), pages.map(Page::sequence))
+            assertEquals(
+                listOf(PageQualityState.NORMAL, PageQualityState.NORMAL),
+                pages.map(Page::qualityState),
+            )
+        }
+
+    @Test
+    fun `undo restores both the deleted page and the cleared duplicate warning`() =
+        runBlocking {
+            // 削除と重複の解消はひとまとめの1操作（同 §3.4。取り消しは直前1操作）
+            insertPages(3, duplicateIndexes = setOf(2))
+            val before = repository.findByProject(projectId)
+
+            repository.deleteResolvingDuplicates(
+                projectId = projectId,
+                pageIds = setOf(pageIds[1]),
+                resolvedDuplicatePageIds = setOf(pageIds[2]),
+            )
+
+            assertTrue(repository.undoLastEdit())
+            assertEquals(before, repository.findByProject(projectId))
+            assertFalse(repository.undoLastEdit())
+        }
+
+    @Test
+    fun `resolving leaves pages without a duplicate warning untouched`() =
+        runBlocking {
+            insertPages(3)
+            val before = repository.findByProject(projectId)
+
+            repository.deleteResolvingDuplicates(
+                projectId = projectId,
+                pageIds = emptySet(),
+                resolvedDuplicatePageIds = setOf(pageIds[0]),
+            )
+
+            assertEquals(before, repository.findByProject(projectId))
+        }
+
+    @Test
+    fun `a page cannot be deleted and kept by the same edit`() =
+        runBlocking {
+            insertPages(3, duplicateIndexes = setOf(2))
+
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking {
+                    repository.deleteResolvingDuplicates(
+                        projectId = projectId,
+                        pageIds = setOf(pageIds[2]),
+                        resolvedDuplicatePageIds = setOf(pageIds[2]),
+                    )
+                }
+            }
+            assertEquals(3, repository.findByProject(projectId).size)
         }
 
     @Test
@@ -129,16 +204,114 @@ class PageRepositoryEditingTest {
             assertFalse(repository.undoLastEdit())
         }
 
+    @Test
+    fun `page edit stores rotation and crop as one undoable operation`() =
+        runBlocking {
+            insertPages(2, PageOcrState.SUCCEEDED)
+            val before = repository.findById(pageIds[0])
+            val crop = PageCrop(0.1f, 0.2f, 0.9f, 0.8f)
+
+            val applied = repository.updatePageEdit(pageIds[0], rotation = 90, crop = crop)
+
+            assertEquals(1, applied)
+            val edited = requireNotNull(repository.findById(pageIds[0]))
+            assertEquals(90, edited.rotation)
+            assertEquals(crop, edited.crop)
+            assertEquals(PageOcrState.STALE, edited.ocrState)
+
+            // 回転と切り取りは1操作。取り消しで両方が同時に戻る
+            assertTrue(repository.undoLastEdit())
+            assertEquals(before, repository.findById(pageIds[0]))
+            assertFalse(repository.undoLastEdit())
+        }
+
+    @Test
+    fun `project wide crop applies to every page as one undoable operation`() =
+        runBlocking {
+            insertPages(3, PageOcrState.SUCCEEDED)
+            repository.updateRotation(pageIds[1], 180)
+            val before = repository.findByProject(projectId)
+            val crop = PageCrop(0.05f, 0.05f, 0.95f, 0.95f)
+
+            val applied =
+                repository.updatePageEdit(
+                    pageId = pageIds[0],
+                    rotation = 90,
+                    crop = crop,
+                    cropScope = PageCropScope.PROJECT,
+                )
+
+            assertEquals(3, applied)
+            val pages = repository.findByProject(projectId)
+            assertTrue(pages.all { it.crop == crop && it.ocrState == PageOcrState.STALE })
+            assertEquals(90, pages.single { it.id == pageIds[0] }.rotation)
+            // 一括適用でも取り消しは1件。全ページが元の crop と OCR 状態へ戻る
+            assertTrue(repository.undoLastEdit())
+            assertEquals(before, repository.findByProject(projectId))
+            assertFalse(repository.undoLastEdit())
+        }
+
+    @Test
+    fun `project wide crop leaves no page changed when one page fails`() =
+        runBlocking {
+            insertPages(3, PageOcrState.SUCCEEDED)
+            val before = repository.findByProject(projectId)
+            dao.failCropUpdatesFor(pageIds[2].toString())
+
+            assertThrows(IllegalStateException::class.java) {
+                runBlocking {
+                    repository.updatePageEdit(
+                        pageId = pageIds[0],
+                        rotation = 90,
+                        crop = PageCrop(0.05f, 0.05f, 0.95f, 0.95f),
+                        cropScope = PageCropScope.PROJECT,
+                    )
+                }
+            }
+
+            // 途中で失敗したら1ページも書き換わらず、取り消し履歴も増えない
+            assertEquals(before, repository.findByProject(projectId))
+            assertFalse(repository.undoLastEdit())
+        }
+
+    @Test
+    fun `page edit leaves rotation unchanged when its crop fails`() =
+        runBlocking {
+            insertPages(1, PageOcrState.SUCCEEDED)
+            val before = repository.findById(pageIds[0])
+            dao.failCropUpdatesFor(pageIds[0].toString())
+
+            assertThrows(IllegalStateException::class.java) {
+                runBlocking {
+                    repository.updatePageEdit(
+                        pageId = pageIds[0],
+                        rotation = 90,
+                        crop = PageCrop(0.1f, 0.2f, 0.9f, 0.8f),
+                    )
+                }
+            }
+
+            // 回転だけが保存に残ると、破棄して閉じても向きが戻らなくなる
+            assertEquals(before, repository.findById(pageIds[0]))
+            assertFalse(repository.undoLastEdit())
+        }
+
     private suspend fun insertPages(
         count: Int,
         ocrState: PageOcrState = PageOcrState.PENDING,
+        duplicateIndexes: Set<Int> = emptySet(),
     ) {
-        repeat(count) { index -> repository.insert(page(index, ocrState)) }
+        repeat(count) { index ->
+            val qualityState =
+                if (index in duplicateIndexes) PageQualityState.DUPLICATE else PageQualityState.NORMAL
+            repository.insert(page(index, ocrState, qualityState))
+        }
     }
 
     private fun page(
         index: Int,
         ocrState: PageOcrState,
+        qualityState: PageQualityState = PageQualityState.NORMAL,
     ) = Page(
         id = pageIds[index],
         projectId = projectId,
@@ -151,13 +324,38 @@ class PageRepositoryEditingTest {
         capturedAt = Instant.parse("2026-08-27T01:02:03Z").plusSeconds(index.toLong()),
         contentHash = "content-$index",
         perceptualHash = "perceptual-$index",
-        qualityState = PageQualityState.NORMAL,
+        qualityState = qualityState,
         ocrState = ocrState,
     )
 }
 
 private class InMemoryPageDao : PageDao() {
     private val pages = mutableMapOf<String, PageEntity>()
+    private val failingCropIds = mutableSetOf<String>()
+
+    /** 指定ページの切り取り更新を「1行も更新できなかった」状態にする（書き込み途中の失敗を作る） */
+    fun failCropUpdatesFor(id: String) {
+        failingCropIds += id
+    }
+
+    /**
+     * production の [PageDao.updatePageEdit] には `@Transaction` が付いていて、途中で落ちれば
+     * それまでの書き込みごと巻き戻る。代役でもその約束を写しておく
+     * （巻き戻らない代役だと、原子性のテストが代役の都合で通ってしまう）。
+     */
+    override suspend fun updatePageEdit(
+        pageId: String,
+        rotation: Int,
+        crop: PageCrop,
+        projectWideCrop: Boolean,
+    ): Int {
+        val snapshot = pages.toMap()
+        return runCatching { super.updatePageEdit(pageId, rotation, crop, projectWideCrop) }
+            .onFailure {
+                pages.clear()
+                pages.putAll(snapshot)
+            }.getOrThrow()
+    }
 
     override suspend fun insert(page: PageEntity) {
         check(pages.putIfAbsent(page.id, page) == null)
@@ -179,6 +377,11 @@ private class InMemoryPageDao : PageDao() {
 
     override suspend fun deleteByIds(ids: List<String>): Int = ids.count { pages.remove(it) != null }
 
+    override suspend fun updateQualityState(
+        id: String,
+        qualityState: String,
+    ): Int = update(id) { copy(qualityState = qualityState) }
+
     override suspend fun updateRotationAndMarkStale(
         id: String,
         rotation: Int,
@@ -191,14 +394,18 @@ private class InMemoryPageDao : PageDao() {
         right: Float,
         bottom: Float,
     ): Int =
-        update(id) {
-            copy(
-                cropLeft = left,
-                cropTop = top,
-                cropRight = right,
-                cropBottom = bottom,
-                ocrState = PageOcrState.STALE.serializedName,
-            )
+        if (id in failingCropIds) {
+            0
+        } else {
+            update(id) {
+                copy(
+                    cropLeft = left,
+                    cropTop = top,
+                    cropRight = right,
+                    cropBottom = bottom,
+                    ocrState = PageOcrState.STALE.serializedName,
+                )
+            }
         }
 
     override suspend fun restoreRotation(

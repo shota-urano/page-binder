@@ -24,6 +24,15 @@ val ColorError = Color(0xFFDC2626)
 val ColorWarning = Color(0xFFD97706)
 val ColorSuccess = Color(0xFF16A34A)
 
+/**
+ * docs/design/system/01-tokens.md `--color-overlay-bg`（#1A2233 @85%）/ `--color-overlay-text`。
+ *
+ * 85% はフローティングUIが他アプリの上に重なるための値。回転・切り取り編集の暗色キャンバス
+ * （docs/design/08-page-edit.md）は背面に透かすものが無いので、同じ地色を不透明で置く。
+ */
+val ColorOverlayBg = Color(0xFF1A2233)
+val ColorOverlayText = Color(0xFFFFFFFF)
+
 /** モックの完了バッジ地（#AEEFDA 相当）に合わせた accent の白混ぜ率 */
 private const val ACCENT_CONTAINER_TINT = 0.38f
 

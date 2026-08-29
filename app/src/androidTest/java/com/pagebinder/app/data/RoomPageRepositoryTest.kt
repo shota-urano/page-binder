@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pagebinder.app.domain.Page
 import com.pagebinder.app.domain.PageCrop
+import com.pagebinder.app.domain.PageCropScope
 import com.pagebinder.app.domain.PageOcrState
 import com.pagebinder.app.domain.PageQualityState
 import kotlinx.coroutines.runBlocking
@@ -146,6 +147,73 @@ class RoomPageRepositoryTest {
 
             assertTrue(repository.undoLastEdit())
             assertEquals(before, repository.findById(pageIds[0]))
+        }
+
+    @Test
+    fun pageEditStoresRotationAndCropAsOneUndoableOperation() =
+        runBlocking {
+            insertPages(2, PageOcrState.SUCCEEDED)
+            val before = repository.findById(pageIds[0])
+            val crop = PageCrop(0.1f, 0.2f, 0.9f, 0.8f)
+
+            val applied = repository.updatePageEdit(pageIds[0], rotation = 90, crop = crop)
+
+            assertEquals(1, applied)
+            val edited = requireNotNull(repository.findById(pageIds[0]))
+            assertEquals(90, edited.rotation)
+            assertEquals(crop, edited.crop)
+            assertEquals(PageOcrState.STALE, edited.ocrState)
+
+            assertTrue(repository.undoLastEdit())
+            assertEquals(before, repository.findById(pageIds[0]))
+            assertFalse(repository.undoLastEdit())
+        }
+
+    @Test
+    fun projectWideCropAppliesToEveryPageAsOneUndoableOperation() =
+        runBlocking {
+            insertPages(4, PageOcrState.SUCCEEDED)
+            repository.updateRotation(pageIds[1], 180)
+            val before = repository.findByProject(projectId)
+            val crop = PageCrop(0.05f, 0.05f, 0.95f, 0.95f)
+
+            val applied =
+                repository.updatePageEdit(
+                    pageId = pageIds[0],
+                    rotation = 90,
+                    crop = crop,
+                    cropScope = PageCropScope.PROJECT,
+                )
+
+            assertEquals(4, applied)
+            val pages = repository.findByProject(projectId)
+            assertTrue(pages.all { it.crop == crop && it.ocrState == PageOcrState.STALE })
+            assertEquals(90, pages.single { it.id == pageIds[0] }.rotation)
+
+            // 書籍全体への適用でも取り消しは1操作（docs/specs/08-page-editing.md §3.4）
+            assertTrue(repository.undoLastEdit())
+            assertEquals(before, repository.findByProject(projectId))
+            assertFalse(repository.undoLastEdit())
+        }
+
+    @Test
+    fun pageEditRollsBackWhenTargetPageIsMissing() =
+        runBlocking {
+            insertPages(2, PageOcrState.SUCCEEDED)
+            val before = repository.findByProject(projectId)
+
+            // 存在しないページを指した保存では、1行も書き換わらない
+            runCatching {
+                repository.updatePageEdit(
+                    pageId = UUID.fromString("20000000-0000-0000-0000-000000000099"),
+                    rotation = 90,
+                    crop = PageCrop(0.1f, 0.1f, 0.9f, 0.9f),
+                    cropScope = PageCropScope.PROJECT,
+                )
+            }
+
+            assertEquals(before, repository.findByProject(projectId))
+            assertFalse(repository.undoLastEdit())
         }
 
     private suspend fun insertPages(

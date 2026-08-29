@@ -28,6 +28,18 @@
             android:exported="true"
             android:label="@string/ocr_edit_preview_label"
             android:theme="@style/Theme.PageBinder" />
+        <!-- debug 専用の回転・切り取り編集プレビュー。ランチャーには出さず `adb shell am start` で開く -->
+        <activity
+            android:name=".preview.PageEditScreenPreviewActivity"
+            android:exported="true"
+            android:label="@string/page_edit_preview_label"
+            android:theme="@style/Theme.PageBinder" />
+        <!-- debug 専用の重複・黒画面の確認プレビュー。ランチャーには出さず `adb shell am start` で開く -->
+        <activity
+            android:name=".preview.DuplicateReviewScreenPreviewActivity"
+            android:exported="true"
+            android:label="@string/duplicate_review_preview_label"
+            android:theme="@style/Theme.PageBinder" />
     </application>
 
 </manifest>

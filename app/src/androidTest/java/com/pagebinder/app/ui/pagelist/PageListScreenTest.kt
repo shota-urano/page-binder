@@ -25,6 +25,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.pagebinder.app.R
 import com.pagebinder.app.domain.Page
 import com.pagebinder.app.domain.PageCrop
+import com.pagebinder.app.domain.PageCropScope
 import com.pagebinder.app.domain.PageOcrState
 import com.pagebinder.app.domain.PageQualityState
 import com.pagebinder.app.domain.PageRepository
@@ -535,6 +536,13 @@ class PageListScreenTest {
                     .mapIndexed { index, page -> page.copy(sequence = index + 1) }
         }
 
+        /** この画面は重複の解消を行わないので、呼ばれたら誤り */
+        override suspend fun deleteResolvingDuplicates(
+            projectId: UUID,
+            pageIds: Set<UUID>,
+            resolvedDuplicatePageIds: Set<UUID>,
+        ) = throw UnsupportedOperationException()
+
         override suspend fun updateRotation(
             pageId: UUID,
             rotation: Int,
@@ -544,6 +552,13 @@ class PageListScreenTest {
             pageId: UUID,
             crop: PageCrop,
         ) = throw UnsupportedOperationException()
+
+        override suspend fun updatePageEdit(
+            pageId: UUID,
+            rotation: Int,
+            crop: PageCrop,
+            cropScope: PageCropScope,
+        ): Int = throw UnsupportedOperationException()
 
         override suspend fun undoLastEdit(): Boolean {
             val snapshot = undoSnapshot ?: return false
