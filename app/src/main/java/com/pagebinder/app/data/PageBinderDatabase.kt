@@ -132,6 +132,8 @@ interface OcrJobDao {
     exportSchema = false,
 )
 abstract class PageBinderDatabase : RoomDatabase() {
+    abstract fun bookProjectDao(): BookProjectDao
+
     abstract fun pageDao(): PageDao
 
     abstract fun ocrJobDao(): OcrJobDao
