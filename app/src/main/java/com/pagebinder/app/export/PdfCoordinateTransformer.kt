@@ -1,5 +1,8 @@
 package com.pagebinder.app.export
 
+import com.pagebinder.app.image.ImageAffineMatrix
+import com.pagebinder.app.image.ImageCoordinateTransformer
+
 /** A framework-independent affine matrix using x' = ax + cy + tx, y' = bx + dy + ty. */
 internal data class PdfAffineMatrix(
     val a: Float,
@@ -183,17 +186,21 @@ internal class PdfCoordinateTransformer private constructor(
                 "PDF page width must be finite and positive"
             }
 
-            val rotatedWidth = if (rotationDegrees % 180 == 0) sourceWidth.toFloat() else sourceHeight.toFloat()
-            val rotatedHeight = if (rotationDegrees % 180 == 0) sourceHeight.toFloat() else sourceWidth.toFloat()
-            val cropLeft = crop.left * rotatedWidth
-            val cropTop = crop.top * rotatedHeight
-            val croppedWidth = (crop.right - crop.left) * rotatedWidth
-            val croppedHeight = (crop.bottom - crop.top) * rotatedHeight
+            val imageTransform =
+                ImageCoordinateTransformer.create(
+                    sourceWidth = sourceWidth,
+                    sourceHeight = sourceHeight,
+                    rotationDegrees = rotationDegrees,
+                    cropLeft = crop.left,
+                    cropTop = crop.top,
+                    cropRight = crop.right,
+                    cropBottom = crop.bottom,
+                )
+            val croppedWidth = imageTransform.croppedSize.width
+            val croppedHeight = imageTransform.croppedSize.height
             val scale = pageWidth / croppedWidth
             val pageSize = PdfPageSize(pageWidth, croppedHeight * scale)
 
-            val sourceToRotated = rotationMatrix(rotationDegrees, sourceWidth.toFloat(), sourceHeight.toFloat())
-            val rotatedToCropped = translation(-cropLeft, -cropTop)
             val croppedToPdf =
                 PdfAffineMatrix(
                     a = scale,
@@ -203,27 +210,11 @@ internal class PdfCoordinateTransformer private constructor(
                     tx = 0f,
                     ty = pageSize.height,
                 )
-            val sourceToPdf = sourceToRotated.then(rotatedToCropped).then(croppedToPdf)
+            val sourceToPdf = imageTransform.sourceToCropped.toPdfMatrix().then(croppedToPdf)
 
             return PdfCoordinateTransformer(pageSize, sourceToPdf)
         }
-
-        private fun rotationMatrix(
-            degrees: Int,
-            sourceWidth: Float,
-            sourceHeight: Float,
-        ): PdfAffineMatrix =
-            when (degrees) {
-                0 -> PdfAffineMatrix(1f, 0f, 0f, 1f, 0f, 0f)
-                90 -> PdfAffineMatrix(0f, 1f, -1f, 0f, sourceHeight, 0f)
-                180 -> PdfAffineMatrix(-1f, 0f, 0f, -1f, sourceWidth, sourceHeight)
-                270 -> PdfAffineMatrix(0f, -1f, 1f, 0f, 0f, sourceWidth)
-                else -> error("Rotation was validated before matrix creation")
-            }
-
-        private fun translation(
-            x: Float,
-            y: Float,
-        ): PdfAffineMatrix = PdfAffineMatrix(1f, 0f, 0f, 1f, x, y)
     }
 }
+
+private fun ImageAffineMatrix.toPdfMatrix() = PdfAffineMatrix(a, b, c, d, tx, ty)
