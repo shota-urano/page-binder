@@ -74,6 +74,29 @@ class RoomBookProjectRepositoryTest {
 
             assertEquals(2, repository.listActive().single().pageCount)
         }
+
+    @Test
+    fun ocrCountsAreAggregatedByRoomQuery() =
+        runBlocking {
+            val repository =
+                RoomBookProjectRepository(
+                    dao = database.bookProjectDao(),
+                    fileStore = EmptyProjectFileStore(),
+                    now = { Instant.parse("2026-08-30T00:00:00Z") },
+                    newId = { projectId },
+                )
+            repository.create("OCR counts", null, null)
+            database.pageDao().insert(testPage(projectId, 1, "succeeded"))
+            database.pageDao().insert(testPage(projectId, 2, "succeeded"))
+            database.pageDao().insert(testPage(projectId, 3, "failed"))
+            database.pageDao().insert(testPage(projectId, 4, "pending"))
+
+            val summary = requireNotNull(repository.findSummaryById(projectId))
+
+            assertEquals(4, summary.pageCount)
+            assertEquals(2, summary.ocrCompletedCount)
+            assertEquals(1, summary.ocrErrorCount)
+        }
 }
 
 private object FailingProjectFileStore : ProjectFileStore {
@@ -97,6 +120,7 @@ private class EmptyProjectFileStore : ProjectFileStore {
 private fun testPage(
     projectId: UUID,
     sequence: Int,
+    ocrState: String = "pending",
 ) = PageEntity(
     id = "20000000-0000-0000-0000-${sequence.toString().padStart(12, '0')}",
     projectId = projectId.toString(),
@@ -113,7 +137,7 @@ private fun testPage(
     contentHash = "content-$sequence",
     perceptualHash = "perceptual-$sequence",
     qualityState = "normal",
-    ocrState = "pending",
+    ocrState = ocrState,
 )
 
 @Database(

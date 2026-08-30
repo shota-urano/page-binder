@@ -21,6 +21,8 @@ import java.util.UUID
 data class BookProjectAggregateEntity(
     @Embedded val project: BookProjectEntity,
     val pageCount: Int,
+    val ocrCompletedCount: Int = 0,
+    val ocrErrorCount: Int = 0,
 )
 
 @Dao
@@ -33,7 +35,10 @@ abstract class BookProjectDao {
 
     @Query(
         """
-        SELECT book_projects.*, COUNT(pages.id) AS pageCount
+        SELECT book_projects.*,
+               COUNT(pages.id) AS pageCount,
+               COALESCE(SUM(CASE WHEN pages.ocr_state = 'succeeded' THEN 1 ELSE 0 END), 0) AS ocrCompletedCount,
+               COALESCE(SUM(CASE WHEN pages.ocr_state = 'failed' THEN 1 ELSE 0 END), 0) AS ocrErrorCount
         FROM book_projects
         LEFT JOIN pages ON pages.project_id = book_projects.id
         WHERE book_projects.deleted_at IS NULL
@@ -44,7 +49,10 @@ abstract class BookProjectDao {
 
     @Query(
         """
-        SELECT book_projects.*, COUNT(pages.id) AS pageCount
+        SELECT book_projects.*,
+               COUNT(pages.id) AS pageCount,
+               COALESCE(SUM(CASE WHEN pages.ocr_state = 'succeeded' THEN 1 ELSE 0 END), 0) AS ocrCompletedCount,
+               COALESCE(SUM(CASE WHEN pages.ocr_state = 'failed' THEN 1 ELSE 0 END), 0) AS ocrErrorCount
         FROM book_projects
         LEFT JOIN pages ON pages.project_id = book_projects.id
         WHERE book_projects.deleted_at IS NOT NULL
@@ -53,6 +61,20 @@ abstract class BookProjectDao {
         """,
     )
     abstract suspend fun listTrash(): List<BookProjectAggregateEntity>
+
+    @Query(
+        """
+        SELECT book_projects.*,
+               COUNT(pages.id) AS pageCount,
+               COALESCE(SUM(CASE WHEN pages.ocr_state = 'succeeded' THEN 1 ELSE 0 END), 0) AS ocrCompletedCount,
+               COALESCE(SUM(CASE WHEN pages.ocr_state = 'failed' THEN 1 ELSE 0 END), 0) AS ocrErrorCount
+        FROM book_projects
+        LEFT JOIN pages ON pages.project_id = book_projects.id
+        WHERE book_projects.id = :id
+        GROUP BY book_projects.id
+        """,
+    )
+    abstract suspend fun findSummaryById(id: String): BookProjectAggregateEntity?
 
     @Query(
         """
@@ -167,6 +189,9 @@ class RoomBookProjectRepository(
 
     override suspend fun findById(id: UUID): BookProject? = dao.findById(id.toString())?.toDomain()
 
+    override suspend fun findSummaryById(id: UUID): BookProjectSummary? =
+        dao.findSummaryById(id.toString())?.toSummary()
+
     override suspend fun update(
         id: UUID,
         title: String,
@@ -265,6 +290,8 @@ class RoomBookProjectRepository(
             project = project.toDomain(),
             pageCount = pageCount,
             storageBytes = fileStore.sizeBytes(UUID.fromString(project.id)),
+            ocrCompletedCount = ocrCompletedCount,
+            ocrErrorCount = ocrErrorCount,
         )
 
     private companion object {

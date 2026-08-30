@@ -23,10 +23,14 @@ data class BookProjectSummary(
     val project: BookProject,
     val pageCount: Int,
     val storageBytes: Long,
+    val ocrCompletedCount: Int = 0,
+    val ocrErrorCount: Int = 0,
 ) {
     init {
         require(pageCount >= 0) { "Page count cannot be negative" }
         require(storageBytes >= 0) { "Storage size cannot be negative" }
+        require(ocrCompletedCount >= 0) { "OCR completed count cannot be negative" }
+        require(ocrErrorCount >= 0) { "OCR error count cannot be negative" }
     }
 }
 
@@ -44,6 +48,8 @@ interface BookProjectRepository {
     ): BookProject
 
     suspend fun findById(id: UUID): BookProject?
+
+    suspend fun findSummaryById(id: UUID): BookProjectSummary?
 
     suspend fun update(
         id: UUID,
