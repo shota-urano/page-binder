@@ -557,10 +557,11 @@ Android 14以降の制約に従い、次の順序を厳守する。
 1. OSの画面共有許可を取得する。
 2. `mediaProjection` 種別のフォアグラウンドサービスを開始する。
 3. `MediaProjection` を取得する。
-4. `VirtualDisplay` を1回生成する。
-5. `MediaProjection.Callback` を登録する。
+4. `MediaProjection.Callback` を登録する。
+5. `VirtualDisplay` を1回生成する。
 
-許可Intentや `MediaProjection` インスタンスを再利用しない。
+Android 14以降では `VirtualDisplay` 生成前の Callback 登録を必須とする。許可Intentや
+`MediaProjection` インスタンスを再利用しない。
 
 ### 11.2 1ページの保存手順
 

@@ -22,6 +22,10 @@ import com.pagebinder.app.ui.bookdetail.BookDetailScreen
 import com.pagebinder.app.ui.bookdetail.BookDetailViewModel
 import com.pagebinder.app.ui.bookedit.BookEditScreen
 import com.pagebinder.app.ui.bookedit.BookEditViewModel
+import com.pagebinder.app.ui.captureprep.AuthorizedCaptureRequest
+import com.pagebinder.app.ui.captureprep.CaptureMode
+import com.pagebinder.app.ui.captureprep.CapturePrepRoute
+import com.pagebinder.app.ui.captureprep.CapturePrepViewModel
 import com.pagebinder.app.ui.consent.ConsentGate
 import com.pagebinder.app.ui.consent.ConsentScreen
 import com.pagebinder.app.ui.consent.ConsentUiState
@@ -50,6 +54,7 @@ fun PageBinderApp(
     pageRepository: PageRepository,
     pageThumbnailLoader: PageThumbnailLoader,
     enqueueProjectOcr: suspend (UUID) -> Int,
+    startCapture: (AuthorizedCaptureRequest) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier.fillMaxSize().safeDrawingPadding()) {
@@ -67,6 +72,7 @@ fun PageBinderApp(
                     pageRepository = pageRepository,
                     pageThumbnailLoader = pageThumbnailLoader,
                     enqueueProjectOcr = enqueueProjectOcr,
+                    startCapture = startCapture,
                 )
         }
     }
@@ -84,6 +90,7 @@ private fun PageBinderMain(
     pageRepository: PageRepository,
     pageThumbnailLoader: PageThumbnailLoader,
     enqueueProjectOcr: suspend (UUID) -> Int,
+    startCapture: (AuthorizedCaptureRequest) -> Unit,
 ) {
     var destination by remember { mutableStateOf<MainDestination>(MainDestination.Home) }
     BackHandler(enabled = destination != MainDestination.Home) {
@@ -95,6 +102,7 @@ private fun PageBinderMain(
                 is MainDestination.Detail -> MainDestination.Home
                 MainDestination.Trash -> MainDestination.Home
                 is MainDestination.PageList -> MainDestination.Detail(current.projectId)
+                is MainDestination.CapturePrep -> MainDestination.Detail(current.projectId)
             }
     }
     when (val current = destination) {
@@ -167,8 +175,22 @@ private fun PageBinderMain(
                     BookDetailActions(
                         onBack = { destination = MainDestination.Home },
                         onEdit = { destination = MainDestination.Edit(current.projectId) },
-                        onManualCapture = {},
-                        onContinuousCapture = {},
+                        onManualCapture = {
+                            destination =
+                                MainDestination.CapturePrep(
+                                    projectId = current.projectId,
+                                    bookTitle = detailState.title,
+                                    mode = CaptureMode.MANUAL,
+                                )
+                        },
+                        onContinuousCapture = {
+                            destination =
+                                MainDestination.CapturePrep(
+                                    projectId = current.projectId,
+                                    bookTitle = detailState.title,
+                                    mode = CaptureMode.CONTINUOUS,
+                                )
+                        },
                         onPageList = { destination = MainDestination.PageList(current.projectId) },
                         onOcrBatch = detailViewModel::onOcrBatchRequested,
                         onExport = {},
@@ -177,8 +199,8 @@ private fun PageBinderMain(
                         onMoveToTrashConfirmed = detailViewModel::onMoveToTrashConfirmed,
                         onMoveToTrashDismissed = detailViewModel::onMoveToTrashDismissed,
                         onReload = detailViewModel::load,
-                        manualCaptureAvailable = false,
-                        continuousCaptureAvailable = false,
+                        manualCaptureAvailable = !detailState.loading,
+                        continuousCaptureAvailable = !detailState.loading,
                         exportAvailable = false,
                     ),
             )
@@ -211,6 +233,22 @@ private fun PageBinderMain(
                 onPageOpened = {},
             )
         }
+        is MainDestination.CapturePrep -> {
+            val capturePrepViewModel: CapturePrepViewModel =
+                viewModel(
+                    key = "capture-prep-${current.projectId}-${current.mode}",
+                    factory = CapturePrepViewModel.factory(current.bookTitle, current.mode),
+                )
+            CapturePrepRoute(
+                viewModel = capturePrepViewModel,
+                onBack = { destination = MainDestination.Detail(current.projectId) },
+                onCaptureAuthorized = {
+                    startCapture(it)
+                    destination = MainDestination.Detail(current.projectId)
+                },
+                onCaptureDenied = { destination = MainDestination.Detail(current.projectId) },
+            )
+        }
     }
 }
 
@@ -227,4 +265,10 @@ private sealed interface MainDestination {
     data object Trash : MainDestination
 
     data class PageList(val projectId: UUID) : MainDestination
+
+    data class CapturePrep(
+        val projectId: UUID,
+        val bookTitle: String,
+        val mode: CaptureMode,
+    ) : MainDestination
 }

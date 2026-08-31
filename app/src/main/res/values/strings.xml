@@ -66,6 +66,55 @@
     <string name="book_detail_ocr_failed">OCRを予約できませんでした</string>
     <string name="book_detail_ocr_queued">%1$d件のOCRを予約しました</string>
 
+    <!-- 撮影準備画面（docs/design/05-capture-prep.md / docs/specs/04-capture-session.md §3.2） -->
+    <string name="capture_prep_title">撮影の準備</string>
+    <string name="capture_prep_back">戻る</string>
+    <string name="capture_prep_destination">保存先</string>
+    <string name="capture_prep_mode">撮影方式</string>
+    <string name="capture_prep_manual">手動</string>
+    <string name="capture_prep_continuous">連続</string>
+    <string name="capture_prep_minimum_interval">最短間隔</string>
+    <string name="capture_prep_maximum_pages">最大ページ数</string>
+    <string name="capture_prep_maximum_time">最大時間</string>
+    <string name="capture_prep_seconds">秒</string>
+    <string name="capture_prep_pages">枚</string>
+    <string name="capture_prep_minutes">分</string>
+    <string name="capture_prep_no_limit">—</string>
+    <string name="capture_prep_permissions">必要な許可</string>
+    <string name="capture_prep_overlay_title">他のアプリの上に表示</string>
+    <string name="capture_prep_overlay_description">撮影ボタンを画面に重ねて表示するために必要です</string>
+    <string name="capture_prep_notification_title">撮影中の通知</string>
+    <string name="capture_prep_notification_description">撮影中であることを常に表示し、通知から停止するために必要です</string>
+    <string name="capture_prep_projection_title">画面共有の許可</string>
+    <string name="capture_prep_projection_description">撮影開始時に毎回、Androidの確認画面が表示されます。この端末の画面だけを取得し、外部には送信しません</string>
+    <string name="capture_prep_open_settings">設定を開く</string>
+    <string name="capture_prep_allow">許可する</string>
+    <string name="capture_prep_granted">許可済み</string>
+    <string name="capture_prep_not_granted">未許可</string>
+    <string name="capture_prep_overlay_required">オーバーレイ許可が必要です</string>
+    <string name="capture_prep_notification_required">通知の許可が必要です</string>
+    <string name="capture_prep_projection_denied">画面共有が許可されなかったため、撮影を開始しませんでした</string>
+    <string name="capture_prep_start">撮影開始</string>
+
+    <!-- フローティングUI（docs/design/06-floating-ui.md / docs/specs/04-capture-session.md §3.4） -->
+    <string name="capture_overlay_manual_state">📷 撮影中</string>
+    <string name="capture_overlay_continuous_state">▶ 連続撮影中</string>
+    <string name="capture_overlay_paused_state">⏸ 一時停止中</string>
+    <string name="capture_overlay_stopped_state">■ 停止中</string>
+    <string name="capture_overlay_saved_count">%1$d枚</string>
+    <string name="capture_overlay_capture">ページを撮影</string>
+    <string name="capture_overlay_pause">連続撮影を一時停止</string>
+    <string name="capture_overlay_resume">連続撮影を再開</string>
+    <string name="capture_overlay_stop">撮影を停止</string>
+    <string name="capture_notification_channel">画面撮影</string>
+    <string name="capture_notification_channel_description">撮影セッションの状態と停止操作を表示します</string>
+    <string name="capture_notification_title">PageBinderで画面撮影中</string>
+    <string name="capture_notification_manual">手動撮影中</string>
+    <string name="capture_notification_continuous">連続撮影中</string>
+    <string name="capture_notification_stop">停止</string>
+    <string name="capture_notification_stopped_title">撮影を終了しました</string>
+    <string name="capture_notification_stopped_message">画面共有が停止されたため、撮影セッションを安全に終了しました</string>
+
     <string name="trash_back">戻る</string>
     <string name="trash_title">ごみ箱</string>
     <string name="trash_retention">削除した書籍は30日間保持されます</string>

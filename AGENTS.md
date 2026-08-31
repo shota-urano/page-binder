@@ -27,7 +27,7 @@ PageBinder — 画面キャプチャ・端末内OCR・検索可能PDF化を行�
 4. Room / ML Kit / PDFBox の型を Presentation・Domain 層へ漏らさない。Framework 固有実装は Repository/Gateway インターフェースの実装に閉じ込める。
 5. 画像編集（回転・切り取り）は非破壊で行う。元画像ファイルを上書き・削除する実装を書かない（FR-IMG-007）。
 6. ログへ画像・OCR全文・書籍タイトル・保存URIを出力しない（§16.3）。
-7. MediaProjection の開始は §11.1 の順序（許可取得 → FGS 開始 → MediaProjection 取得 → VirtualDisplay 生成 → Callback 登録）を厳守し、許可 Intent・インスタンスを再利用しない。
+7. MediaProjection の開始は §11.1 の順序（許可取得 → FGS 開始 → MediaProjection 取得 → Callback 登録 → VirtualDisplay 生成）を厳守し、許可 Intent・インスタンスを再利用しない。
 8. ViewModel は画面単位で、不変 `UiState` を `StateFlow` で公開する。UI からデータソースへ直接アクセスしない。再利用 UI 部品に ViewModel を持たせない。
 9. マルチモジュール化・先行抽象化をしない。初版は単一 `:app` + パッケージ境界で分離する（§10.6）。
 10. 依存追加は `gradle/libs.versions.toml` 経由のみ。バージョンをビルドファイルへ直書きしない。
