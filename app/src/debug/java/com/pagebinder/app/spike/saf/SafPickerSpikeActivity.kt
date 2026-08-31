@@ -49,5 +49,7 @@ class SafPickerSpikeActivity : Activity() {
         }
 
         fun awaitResult(timeoutSeconds: Long): PickerResult? = results.poll(timeoutSeconds, TimeUnit.SECONDS)
+
+        fun pollResult(): PickerResult? = results.poll()
     }
 }

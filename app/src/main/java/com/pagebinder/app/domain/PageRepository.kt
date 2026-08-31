@@ -73,6 +73,14 @@ enum class PageCropScope {
 interface PageRepository {
     suspend fun insert(page: Page)
 
+    /** Compensates a newly inserted capture record without creating a user-visible undo entry. */
+    suspend fun rollbackCaptureInsert(
+        projectId: UUID,
+        pageId: UUID,
+    ) {
+        delete(projectId, setOf(pageId))
+    }
+
     suspend fun findById(id: UUID): Page?
 
     suspend fun findByProject(projectId: UUID): List<Page>

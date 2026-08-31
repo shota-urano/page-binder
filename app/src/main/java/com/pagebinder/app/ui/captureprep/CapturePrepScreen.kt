@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pagebinder.app.R
+import com.pagebinder.app.domain.AutoCaptureSensitivity
 import com.pagebinder.app.ui.theme.ButtonCornerRadius
 import com.pagebinder.app.ui.theme.CardCornerRadius
 import com.pagebinder.app.ui.theme.ColorPrimary
@@ -54,6 +56,8 @@ data class CapturePrepActions(
     val onMinimumIntervalChanged: (Int) -> Unit,
     val onMaximumPagesChanged: (Int?) -> Unit,
     val onMaximumMinutesChanged: (Int?) -> Unit,
+    val onSensitivityChanged: (AutoCaptureSensitivity) -> Unit = {},
+    val onCaptureSoundChanged: (Boolean) -> Unit = {},
     val onOpenOverlaySettings: () -> Unit,
     val onRequestNotificationPermission: () -> Unit,
     val onStart: () -> Unit,
@@ -132,6 +136,46 @@ private fun CaptureModeCard(
         }
         if (uiState.mode == CaptureMode.CONTINUOUS) {
             ContinuousSettings(uiState, actions)
+            SensitivitySettings(uiState, actions)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.capture_prep_sound_title))
+                Text(
+                    stringResource(R.string.capture_prep_sound_description),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ColorTextSecondary,
+                )
+            }
+            Switch(
+                checked = uiState.captureSoundEnabled,
+                onCheckedChange = actions.onCaptureSoundChanged,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SensitivitySettings(
+    uiState: CapturePrepUiState,
+    actions: CapturePrepActions,
+) {
+    Text(stringResource(R.string.capture_prep_sensitivity), style = MaterialTheme.typography.bodyLarge)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(SpaceUnit)) {
+        AutoCaptureSensitivity.entries.forEach { sensitivity ->
+            ModeButton(
+                label =
+                    stringResource(
+                        when (sensitivity) {
+                            AutoCaptureSensitivity.LOW -> R.string.capture_prep_sensitivity_low
+                            AutoCaptureSensitivity.MEDIUM -> R.string.capture_prep_sensitivity_medium
+                            AutoCaptureSensitivity.HIGH -> R.string.capture_prep_sensitivity_high
+                        },
+                    ),
+                selected = uiState.sensitivity == sensitivity,
+                onClick = { actions.onSensitivityChanged(sensitivity) },
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }

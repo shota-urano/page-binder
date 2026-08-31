@@ -15,7 +15,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pagebinder.app.domain.AutoCaptureSettingsRepository
 import com.pagebinder.app.domain.BookProjectRepository
+import com.pagebinder.app.domain.CaptureFeedbackSettingsRepository
 import com.pagebinder.app.domain.PageRepository
 import com.pagebinder.app.ui.bookdetail.BookDetailActions
 import com.pagebinder.app.ui.bookdetail.BookDetailScreen
@@ -54,7 +56,9 @@ fun PageBinderApp(
     pageRepository: PageRepository,
     pageThumbnailLoader: PageThumbnailLoader,
     enqueueProjectOcr: suspend (UUID) -> Int,
-    startCapture: (AuthorizedCaptureRequest) -> Unit,
+    autoCaptureSettingsRepository: AutoCaptureSettingsRepository,
+    captureFeedbackSettingsRepository: CaptureFeedbackSettingsRepository,
+    startCapture: (UUID, AuthorizedCaptureRequest) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier.fillMaxSize().safeDrawingPadding()) {
@@ -72,6 +76,8 @@ fun PageBinderApp(
                     pageRepository = pageRepository,
                     pageThumbnailLoader = pageThumbnailLoader,
                     enqueueProjectOcr = enqueueProjectOcr,
+                    autoCaptureSettingsRepository = autoCaptureSettingsRepository,
+                    captureFeedbackSettingsRepository = captureFeedbackSettingsRepository,
                     startCapture = startCapture,
                 )
         }
@@ -90,7 +96,9 @@ private fun PageBinderMain(
     pageRepository: PageRepository,
     pageThumbnailLoader: PageThumbnailLoader,
     enqueueProjectOcr: suspend (UUID) -> Int,
-    startCapture: (AuthorizedCaptureRequest) -> Unit,
+    autoCaptureSettingsRepository: AutoCaptureSettingsRepository,
+    captureFeedbackSettingsRepository: CaptureFeedbackSettingsRepository,
+    startCapture: (UUID, AuthorizedCaptureRequest) -> Unit,
 ) {
     var destination by remember { mutableStateOf<MainDestination>(MainDestination.Home) }
     BackHandler(enabled = destination != MainDestination.Home) {
@@ -237,13 +245,19 @@ private fun PageBinderMain(
             val capturePrepViewModel: CapturePrepViewModel =
                 viewModel(
                     key = "capture-prep-${current.projectId}-${current.mode}",
-                    factory = CapturePrepViewModel.factory(current.bookTitle, current.mode),
+                    factory =
+                        CapturePrepViewModel.factory(
+                            current.bookTitle,
+                            current.mode,
+                            autoCaptureSettingsRepository,
+                            captureFeedbackSettingsRepository,
+                        ),
                 )
             CapturePrepRoute(
                 viewModel = capturePrepViewModel,
                 onBack = { destination = MainDestination.Detail(current.projectId) },
                 onCaptureAuthorized = {
-                    startCapture(it)
+                    startCapture(current.projectId, it)
                     destination = MainDestination.Detail(current.projectId)
                 },
                 onCaptureDenied = { destination = MainDestination.Detail(current.projectId) },

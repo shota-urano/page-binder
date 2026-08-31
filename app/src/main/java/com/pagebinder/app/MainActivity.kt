@@ -46,7 +46,9 @@ private fun PageBinderRoot() {
         pageRepository = application.pageRepository,
         pageThumbnailLoader = application.pageThumbnailLoader,
         enqueueProjectOcr = application.ocrQueue::enqueueProject,
-        startCapture = { request ->
+        autoCaptureSettingsRepository = application.autoCaptureSettingsRepository,
+        captureFeedbackSettingsRepository = application.captureFeedbackSettingsRepository,
+        startCapture = { projectId, request ->
             CaptureForegroundService.start(
                 context = context,
                 resultCode = request.resultCode,
@@ -56,6 +58,8 @@ private fun PageBinderRoot() {
                         UiCaptureMode.MANUAL -> CaptureMode.MANUAL
                         UiCaptureMode.CONTINUOUS -> CaptureMode.CONTINUOUS
                     },
+                projectId = projectId,
+                autoCaptureSettings = request.autoCaptureSettings,
             )
         },
     )

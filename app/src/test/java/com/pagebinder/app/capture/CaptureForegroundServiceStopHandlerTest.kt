@@ -43,4 +43,12 @@ class CaptureForegroundServiceStopHandlerTest {
             ),
         )
     }
+
+    @Test
+    fun `オーバーレイ未許可では MediaProjection の開始を許可しない`() {
+        val guard = CaptureOverlayPermissionGuard()
+
+        assertFalse(guard.canStart(overlayGranted = false))
+        assertTrue(guard.canStart(overlayGranted = true))
+    }
 }

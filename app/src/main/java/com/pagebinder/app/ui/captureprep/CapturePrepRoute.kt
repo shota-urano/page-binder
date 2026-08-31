@@ -23,11 +23,14 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.pagebinder.app.domain.AutoCaptureSettings
+import java.time.Duration
 
 data class AuthorizedCaptureRequest(
     val resultCode: Int,
     val permissionData: Intent,
     val mode: CaptureMode,
+    val autoCaptureSettings: AutoCaptureSettings,
 )
 
 @Composable
@@ -71,6 +74,13 @@ fun CapturePrepRoute(
                         resultCode = result.resultCode,
                         permissionData = checkNotNull(permissionData),
                         mode = uiState.mode,
+                        autoCaptureSettings =
+                            AutoCaptureSettings(
+                                minimumInterval = Duration.ofSeconds(uiState.minimumIntervalSeconds.toLong()),
+                                maximumPages = uiState.maximumPages,
+                                maximumDuration = uiState.maximumMinutes?.let { Duration.ofMinutes(it.toLong()) },
+                                sensitivity = uiState.sensitivity,
+                            ),
                     ),
                 )
             } else {
@@ -107,6 +117,8 @@ fun CapturePrepRoute(
                 onMinimumIntervalChanged = viewModel::onMinimumIntervalChanged,
                 onMaximumPagesChanged = viewModel::onMaximumPagesChanged,
                 onMaximumMinutesChanged = viewModel::onMaximumMinutesChanged,
+                onSensitivityChanged = viewModel::onSensitivityChanged,
+                onCaptureSoundChanged = viewModel::onCaptureSoundChanged,
                 onOpenOverlaySettings = {
                     overlaySettingsLauncher.launch(
                         Intent(

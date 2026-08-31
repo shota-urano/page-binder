@@ -192,21 +192,104 @@ class SafGoogleDriveSpikeTest {
     }
 
     private fun cancelPicker(instrumentation: Instrumentation): SafPickerSpikeActivity.PickerResult {
-        repeat(MAX_CANCEL_BACK_PRESSES) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(UI_TIMEOUT_SECONDS)
+        var backPresses = 0
+        while (backPresses < MAX_CANCEL_BACK_PRESSES) {
+            SafPickerSpikeActivity.pollResult()?.let { result ->
+                waitForPickerDismissed(instrumentation, deadline)
+                return result
+            }
+            val surfaceBeforeBack = pickerSurface(instrumentation)
+            when (surfaceBeforeBack.packageName) {
+                null -> {
+                    // During an activity transition rootInActiveWindow can be temporarily null.
+                    // Do not mistake that transient state for a dismissed picker.
+                    if (System.nanoTime() >= deadline) {
+                        throw AssertionError("Timed out waiting for SAF picker window")
+                    }
+                    waitForPickerIdle(instrumentation)
+                    Thread.sleep(UI_POLL_MILLIS)
+                    continue
+                }
+                DOCUMENTS_UI_PACKAGE -> Unit
+                else -> return waitForCancelledPickerResult(instrumentation, deadline)
+            }
             assertTrue(
                 "SAF picker did not handle the Back action",
                 instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK),
             )
-            SafPickerSpikeActivity.awaitResult(CANCEL_RESULT_POLL_SECONDS)?.let { result ->
-                waitForPickerDismissed(instrumentation)
-                return result
+            backPresses++
+            when (waitForPickerExitOrTransition(instrumentation, surfaceBeforeBack, deadline)) {
+                PickerCancellationProgress.PICKER_DISMISSED ->
+                    return waitForCancelledPickerResult(instrumentation, deadline)
+                PickerCancellationProgress.DOCUMENTS_UI_TRANSITIONED,
+                PickerCancellationProgress.NO_TRANSITION,
+                -> Unit
             }
         }
-        throw AssertionError("SAF picker did not return a cancelled result")
+        return waitForCancelledPickerResult(instrumentation, deadline)
     }
 
-    private fun waitForPickerDismissed(instrumentation: Instrumentation) {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(UI_TIMEOUT_SECONDS)
+    private fun waitForPickerExitOrTransition(
+        instrumentation: Instrumentation,
+        surfaceBeforeBack: PickerSurface,
+        deadline: Long,
+    ): PickerCancellationProgress {
+        val transitionDeadline =
+            minOf(
+                deadline,
+                System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(CANCEL_TRANSITION_TIMEOUT_MILLIS),
+            )
+        do {
+            val currentSurface = pickerSurface(instrumentation)
+            if (currentSurface.packageName == null) {
+                waitForPickerIdle(instrumentation)
+                Thread.sleep(UI_POLL_MILLIS)
+                continue
+            }
+            if (
+                currentSurface.packageName != DOCUMENTS_UI_PACKAGE
+            ) {
+                return PickerCancellationProgress.PICKER_DISMISSED
+            }
+            if (currentSurface != surfaceBeforeBack) return PickerCancellationProgress.DOCUMENTS_UI_TRANSITIONED
+            waitForPickerIdle(instrumentation)
+            Thread.sleep(UI_POLL_MILLIS)
+        } while (System.nanoTime() < transitionDeadline)
+        return PickerCancellationProgress.NO_TRANSITION
+    }
+
+    private fun waitForCancelledPickerResult(
+        instrumentation: Instrumentation,
+        deadline: Long,
+    ): SafPickerSpikeActivity.PickerResult {
+        waitForPickerDismissed(instrumentation, deadline)
+        do {
+            SafPickerSpikeActivity.pollResult()?.let { return it }
+            Thread.sleep(UI_POLL_MILLIS)
+        } while (System.nanoTime() < deadline)
+        throw AssertionError("SAF picker dismissed without returning a cancelled result")
+    }
+
+    private fun pickerSurface(instrumentation: Instrumentation): PickerSurface {
+        val root = instrumentation.uiAutomation.rootInActiveWindow
+        return PickerSurface(
+            packageName = root?.packageName?.toString(),
+            signature =
+                root
+                    ?.descendants()
+                    .orEmpty()
+                    .take(PICKER_SURFACE_SIGNATURE_NODE_LIMIT)
+                    .joinToString("|") { node ->
+                        "${node.viewIdResourceName}:${node.text}:${node.contentDescription}"
+                    },
+        )
+    }
+
+    private fun waitForPickerDismissed(
+        instrumentation: Instrumentation,
+        deadline: Long,
+    ) {
         do {
             waitForPickerIdle(instrumentation)
             val activePackage = instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString()
@@ -415,6 +498,17 @@ class SafGoogleDriveSpikeTest {
 
     private fun elapsedMillis(startedAt: Long): Long = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
 
+    private data class PickerSurface(
+        val packageName: String?,
+        val signature: String,
+    )
+
+    private enum class PickerCancellationProgress {
+        PICKER_DISMISSED,
+        DOCUMENTS_UI_TRANSITIONED,
+        NO_TRANSITION,
+    }
+
     companion object {
         private const val DRIVE_PACKAGE = "com.google.android.apps.docs"
         private const val DRIVE_AUTHORITY = "com.google.android.apps.docs.storage"
@@ -428,13 +522,14 @@ class SafGoogleDriveSpikeTest {
         private const val METRICS_FILE = "gph-1-saf-drive-metrics.txt"
         private const val PICKER_TIMEOUT_SECONDS = 30L
         private const val PICKER_LAUNCH_ATTEMPTS = 2
-        private const val CANCEL_RESULT_POLL_SECONDS = 2L
         private const val MAX_CANCEL_BACK_PRESSES = 3
         private const val UI_TIMEOUT_SECONDS = 60L
         private const val UI_IDLE_MILLIS = 500L
         private const val UI_IDLE_TIMEOUT_MILLIS = 3_000L
         private const val UI_POLL_MILLIS = 250L
+        private const val CANCEL_TRANSITION_TIMEOUT_MILLIS = 3_000L
         private const val PICKER_DISMISS_STABILITY_MILLIS = 500L
+        private const val PICKER_SURFACE_SIGNATURE_NODE_LIMIT = 64
         private const val PROVIDER_READ_ATTEMPTS = 8
         private const val PROVIDER_RETRY_MILLIS = 500L
         private const val FAIL_AFTER_BYTES = 8 * 1024

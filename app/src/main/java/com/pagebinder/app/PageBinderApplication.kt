@@ -2,19 +2,26 @@ package com.pagebinder.app
 
 import android.app.Application
 import androidx.room.Room
+import com.pagebinder.app.capture.AndroidCaptureFeedbackGateway
 import com.pagebinder.app.capture.AndroidCaptureGateway
+import com.pagebinder.app.capture.CapturePageController
 import com.pagebinder.app.data.PageBinderDatabase
 import com.pagebinder.app.data.RoomBookProjectRepository
 import com.pagebinder.app.data.RoomOcrJobRepository
 import com.pagebinder.app.data.RoomPageRepository
+import com.pagebinder.app.data.createAutoCaptureSettingsRepository
+import com.pagebinder.app.data.createCaptureFeedbackSettingsRepository
 import com.pagebinder.app.domain.BookProjectRepository
-import com.pagebinder.app.domain.CaptureOverlayState
+import com.pagebinder.app.domain.CaptureFeedbackController
+import com.pagebinder.app.domain.CaptureOnePage
 import com.pagebinder.app.domain.CaptureSessionCoordinator
 import com.pagebinder.app.domain.CaptureSessionLifecycle
+import com.pagebinder.app.domain.CaptureStopReason
 import com.pagebinder.app.domain.OcrImageSource
 import com.pagebinder.app.domain.OcrJobRunner
 import com.pagebinder.app.domain.OcrQueue
 import com.pagebinder.app.domain.PageRepository
+import com.pagebinder.app.image.FileCaptureImageStore
 import com.pagebinder.app.image.FilePageThumbnailLoader
 import com.pagebinder.app.ocr.AndroidOcrExecutionPolicy
 import com.pagebinder.app.ocr.MlKitOcrGateway
@@ -41,21 +48,66 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
     val pageThumbnailLoader by lazy { FilePageThumbnailLoader(filesDir, pageRepository) }
     val ocrQueueScheduler by lazy { WorkManagerOcrQueueScheduler(this) }
     val ocrQueue by lazy { OcrQueue(repository, ocrQueueScheduler) }
-    val captureSessionLifecycle: CaptureSessionLifecycle by lazy { ocrQueueScheduler }
+    val captureSessionLifecycle: CaptureSessionLifecycle by lazy {
+        object : CaptureSessionLifecycle {
+            override fun onSessionActive() {
+                ocrQueueScheduler.onSessionActive()
+            }
+
+            override fun onSessionIdle() {
+                // This is invoked by the coordinator for every stop reason, including an OS
+                // MediaProjection callback, independently of the service StateFlow observer.
+                capturePageController.clear()
+                ocrQueueScheduler.onSessionIdle()
+            }
+        }
+    }
     val captureGateway by lazy { AndroidCaptureGateway(this) }
+    val captureFeedbackSettingsRepository by lazy { createCaptureFeedbackSettingsRepository(this) }
+    val autoCaptureSettingsRepository by lazy { createAutoCaptureSettingsRepository(this) }
+    private val captureFeedbackController by lazy {
+        CaptureFeedbackController(captureFeedbackSettingsRepository, AndroidCaptureFeedbackGateway(this))
+    }
+    private val captureOnePage by lazy {
+        CaptureOnePage(
+            captureGateway = captureGateway,
+            overlayGateway = captureOverlayController,
+            imageStore = FileCaptureImageStore(filesDir),
+            pageRepository = pageRepository,
+            ocrQueue = ocrQueue,
+        )
+    }
+    val capturePageController by lazy {
+        CapturePageController(
+            scope = applicationScope,
+            captureOnePage = captureOnePage,
+            feedback = captureFeedbackController,
+            captureGateway = captureGateway,
+            overlayGateway = captureOverlayController,
+            settingsRepository = autoCaptureSettingsRepository,
+            lastSavedFingerprint = { projectId ->
+                pageRepository
+                    .findByProject(projectId)
+                    .lastOrNull { page -> page.qualityState != com.pagebinder.app.domain.PageQualityState.BLACK }
+                    ?.perceptualHash
+            },
+            stopSession = { captureSessionCoordinator.stop(CaptureStopReason.EXPLICIT) },
+        )
+    }
     val captureOverlayController: CaptureOverlayController by lazy {
         CaptureOverlayController(
             context = this,
             onCapture = {
-                // The page-save flow belongs to docs/specs/05-manual-capture.md and is not started here.
+                capturePageController.capture()
             },
             onPauseChanged = { paused ->
-                captureOverlayController.update(
-                    if (paused) CaptureOverlayState.CONTINUOUS_PAUSED else CaptureOverlayState.CONTINUOUS_ACTIVE,
-                )
+                capturePageController.setPaused(paused)
             },
             onStop = {
-                applicationScope.launch { captureSessionCoordinator.stop() }
+                applicationScope.launch {
+                    captureSessionCoordinator.stop()
+                    capturePageController.clear()
+                }
             },
         )
     }

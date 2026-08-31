@@ -41,6 +41,16 @@ abstract class PageDao {
     @Query("DELETE FROM pages WHERE id IN (:ids)")
     protected abstract suspend fun deleteByIds(ids: List<String>): Int
 
+    @Transaction
+    open suspend fun rollbackCaptureInsert(
+        projectId: String,
+        pageId: String,
+    ) {
+        val page = findById(pageId) ?: return
+        check(page.projectId == projectId) { "Captured page does not belong to project" }
+        check(deleteByIds(listOf(pageId)) == 1) { "Capture rollback did not delete the inserted page" }
+    }
+
     @Query("UPDATE pages SET quality_state = :qualityState WHERE id = :id")
     protected abstract suspend fun updateQualityState(
         id: String,
@@ -309,6 +319,13 @@ class RoomPageRepository(
 ) : PageRepository {
     override suspend fun insert(page: Page) {
         dao.insert(page.toEntity())
+    }
+
+    override suspend fun rollbackCaptureInsert(
+        projectId: UUID,
+        pageId: UUID,
+    ) {
+        dao.rollbackCaptureInsert(projectId.toString(), pageId.toString())
     }
 
     override suspend fun findById(id: UUID): Page? = dao.findById(id.toString())?.toDomain()

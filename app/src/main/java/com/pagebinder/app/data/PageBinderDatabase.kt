@@ -69,7 +69,9 @@ interface OcrJobDao {
     @Query(
         """
         UPDATE pages SET ocr_state = 'pending'
-        WHERE id = :pageId AND ocr_state IN (:expectedStates)
+        WHERE id = :pageId
+          AND quality_state != 'black'
+          AND ocr_state IN (:expectedStates)
         """,
     )
     suspend fun markPending(
@@ -80,7 +82,9 @@ interface OcrJobDao {
     @Query(
         """
         UPDATE pages SET ocr_state = 'pending'
-        WHERE project_id = :projectId AND ocr_state IN (:expectedStates)
+        WHERE project_id = :projectId
+          AND quality_state != 'black'
+          AND ocr_state IN (:expectedStates)
         """,
     )
     suspend fun markProjectPending(
@@ -88,10 +92,21 @@ interface OcrJobDao {
         expectedStates: Set<String>,
     ): Int
 
-    @Query("SELECT * FROM pages WHERE ocr_state = 'pending' ORDER BY captured_at, sequence, id LIMIT 1")
+    @Query(
+        """
+        SELECT * FROM pages
+        WHERE ocr_state = 'pending' AND quality_state != 'black'
+        ORDER BY captured_at, sequence, id LIMIT 1
+        """,
+    )
     suspend fun findNextPending(): PageEntity?
 
-    @Query("UPDATE pages SET ocr_state = 'running' WHERE id = :pageId AND ocr_state = 'pending'")
+    @Query(
+        """
+        UPDATE pages SET ocr_state = 'running'
+        WHERE id = :pageId AND ocr_state = 'pending' AND quality_state != 'black'
+        """,
+    )
     suspend fun claimPending(pageId: String): Int
 
     @Transaction
@@ -102,13 +117,20 @@ interface OcrJobDao {
         }
     }
 
-    @Query("UPDATE pages SET ocr_state = 'pending' WHERE ocr_state = 'running'")
+    @Query("UPDATE pages SET ocr_state = 'pending' WHERE ocr_state = 'running' AND quality_state != 'black'")
     suspend fun recoverInterrupted(): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertResult(result: OcrResultEntity)
 
-    @Query("UPDATE pages SET ocr_state = :targetState WHERE id = :pageId AND ocr_state = :expectedState")
+    @Query(
+        """
+        UPDATE pages SET ocr_state = :targetState
+        WHERE id = :pageId
+          AND ocr_state = :expectedState
+          AND (:targetState != 'pending' OR quality_state != 'black')
+        """,
+    )
     suspend fun transition(
         pageId: String,
         expectedState: String,
