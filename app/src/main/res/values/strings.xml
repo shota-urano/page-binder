@@ -16,6 +16,71 @@
     <string name="consent_decline_notice">同意しない場合、PageBinder の機能はご利用いただけません。</string>
     <string name="consent_save_failed">同意を保存できませんでした。もう一度お試しください。</string>
 
+    <!-- 書籍プロジェクト管理（docs/specs/03-book-project.md） -->
+    <string name="home_trash">ごみ箱</string>
+    <string name="home_search_hint">タイトル・著者で検索</string>
+    <string name="home_sort_updated">更新日時順</string>
+    <string name="home_sort_created">作成日時順</string>
+    <string name="home_sort_title">タイトル順</string>
+    <string name="home_new_book">新しい書籍</string>
+    <string name="home_book_meta">%1$dページ・更新: %2$s</string>
+    <string name="home_empty">書籍がありません。新しい書籍を作成してください。</string>
+    <string name="home_search_empty">条件に一致する書籍はありません</string>
+    <string name="home_load_failed">書籍を読み込めませんでした</string>
+    <string name="home_reload">再読み込み</string>
+
+    <string name="book_edit_back">戻る</string>
+    <string name="book_edit_title_new">新しい書籍</string>
+    <string name="book_edit_title_edit">書籍を編集</string>
+    <string name="book_edit_field_title">タイトル（必須）</string>
+    <string name="book_edit_field_author">著者（任意）</string>
+    <string name="book_edit_field_note">メモ（任意）</string>
+    <string name="book_edit_save">保存</string>
+    <string name="book_edit_saving">保存中</string>
+    <string name="book_edit_error_required">タイトルを入力してください</string>
+    <string name="book_edit_error_too_long">文字数の上限を超えています</string>
+    <string name="book_edit_error_load">書籍を読み込めませんでした</string>
+    <string name="book_edit_error_create">書籍を作成できませんでした。もう一度お試しください。</string>
+    <string name="book_edit_error_update">変更を保存できませんでした。もう一度お試しください。</string>
+
+    <string name="book_detail_back">戻る</string>
+    <string name="book_detail_edit">書籍を編集</string>
+    <string name="book_detail_loading">読み込み中</string>
+    <string name="book_detail_load_failed">書籍を読み込めませんでした。再読み込み</string>
+    <string name="book_detail_page_count">ページ数</string>
+    <string name="book_detail_ocr_completed">OCR完了</string>
+    <string name="book_detail_error_count">エラー</string>
+    <string name="book_detail_storage">使用容量</string>
+    <string name="book_detail_manual_capture">手動撮影を開始</string>
+    <string name="book_detail_continuous_capture">連続撮影を開始</string>
+    <string name="book_detail_pages">ページ一覧</string>
+    <string name="book_detail_ocr_batch">OCR一括実行</string>
+    <string name="book_detail_export">書き出し</string>
+    <string name="book_detail_settings">書籍設定</string>
+    <string name="book_detail_move_to_trash">ごみ箱に移動</string>
+    <string name="book_detail_trash_dialog_title">ごみ箱に移動しますか?</string>
+    <string name="book_detail_trash_dialog_message">『%1$s』（%2$dページ・%3$s）をごみ箱に移動します。30日間は復元できます。</string>
+    <string name="book_detail_trash_dialog_confirm">ごみ箱に移動</string>
+    <string name="book_detail_trash_dialog_cancel">キャンセル</string>
+    <string name="book_detail_trash_failed">書籍をごみ箱に移動できませんでした</string>
+    <string name="book_detail_ocr_failed">OCRを予約できませんでした</string>
+    <string name="book_detail_ocr_queued">%1$d件のOCRを予約しました</string>
+
+    <string name="trash_back">戻る</string>
+    <string name="trash_title">ごみ箱</string>
+    <string name="trash_retention">削除した書籍は30日間保持されます</string>
+    <string name="trash_book_meta">%1$dページ・残り %2$d日</string>
+    <string name="trash_restore">復元</string>
+    <string name="trash_delete">完全に削除</string>
+    <string name="trash_empty">ごみ箱は空です</string>
+    <string name="trash_load_failed">ごみ箱を読み込めませんでした</string>
+    <string name="trash_reload">再読み込み</string>
+    <string name="trash_restore_failed">書籍を復元できませんでした</string>
+    <string name="trash_delete_failed">書籍を完全に削除できませんでした</string>
+    <string name="trash_delete_dialog_title">完全に削除しますか?</string>
+    <string name="trash_delete_dialog_message">『%1$s』（%2$dページ・%3$s）を完全に削除します。この操作は取り消せません。</string>
+    <string name="trash_cancel">キャンセル</string>
+
     <!-- 書き出し時の権限確認（docs/design/11-export.md / docs/specs/12-legal-guardrails.md §3.2）
          export_consent_confirm は specs §4 の確定文言。言い換えない -->
     <string name="export_consent_title">利用上の注意</string>

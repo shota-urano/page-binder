@@ -193,6 +193,9 @@ private class InMemoryBookProjectDao : BookProjectDao() {
             .sortedByDescending { it.deletedAt }
             .map { BookProjectAggregateEntity(it, pageCounts[it.id] ?: 0) }
 
+    override suspend fun findSummaryById(id: String): BookProjectAggregateEntity? =
+        projects[id]?.let { BookProjectAggregateEntity(it, pageCounts[id] ?: 0) }
+
     override suspend fun updateMetadata(
         id: String,
         title: String,

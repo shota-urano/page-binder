@@ -5,11 +5,14 @@ import androidx.room.Room
 import com.pagebinder.app.data.PageBinderDatabase
 import com.pagebinder.app.data.RoomBookProjectRepository
 import com.pagebinder.app.data.RoomOcrJobRepository
+import com.pagebinder.app.data.RoomPageRepository
 import com.pagebinder.app.domain.BookProjectRepository
 import com.pagebinder.app.domain.CaptureSessionLifecycle
 import com.pagebinder.app.domain.OcrImageSource
 import com.pagebinder.app.domain.OcrJobRunner
 import com.pagebinder.app.domain.OcrQueue
+import com.pagebinder.app.domain.PageRepository
+import com.pagebinder.app.image.FilePageThumbnailLoader
 import com.pagebinder.app.ocr.AndroidOcrExecutionPolicy
 import com.pagebinder.app.ocr.MlKitOcrGateway
 import com.pagebinder.app.ocr.OcrWorkerDependencies
@@ -25,6 +28,8 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
     val bookProjectRepository: BookProjectRepository by lazy {
         RoomBookProjectRepository(database.bookProjectDao(), FileProjectFileStore(filesDir))
     }
+    val pageRepository: PageRepository by lazy { RoomPageRepository(database.pageDao()) }
+    val pageThumbnailLoader by lazy { FilePageThumbnailLoader(filesDir, pageRepository) }
     val ocrQueueScheduler by lazy { WorkManagerOcrQueueScheduler(this) }
     val ocrQueue by lazy { OcrQueue(repository, ocrQueueScheduler) }
     val captureSessionLifecycle: CaptureSessionLifecycle by lazy { ocrQueueScheduler }

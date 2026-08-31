@@ -74,13 +74,35 @@ fun PageThumbnail(
     targetWidth: Dp,
     modifier: Modifier = Modifier,
 ) {
+    PageThumbnail(
+        pageId = item.pageId,
+        rotation = item.rotation,
+        crop = item.crop,
+        loader = loader,
+        targetWidth = targetWidth,
+        modifier = modifier,
+    )
+}
+
+/**
+ * 書籍一覧など、ページ一覧の表示モデルを持たない画面から同じ非破壊サムネイルを使う入口。
+ */
+@Composable
+fun PageThumbnail(
+    pageId: UUID,
+    rotation: Int,
+    crop: PageCrop,
+    loader: PageThumbnailLoader,
+    targetWidth: Dp,
+    modifier: Modifier = Modifier,
+) {
     val targetWidthPx = with(LocalDensity.current) { targetWidth.roundToPx() }
     val request =
-        remember(item.pageId, item.rotation, item.crop, targetWidthPx) {
+        remember(pageId, rotation, crop, targetWidthPx) {
             PageThumbnailRequest(
-                pageId = item.pageId,
-                rotation = item.rotation,
-                crop = item.crop,
+                pageId = pageId,
+                rotation = rotation,
+                crop = crop,
                 targetWidthPx = targetWidthPx,
             )
         }

@@ -30,13 +30,18 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun PageBinderRoot() {
     val context = LocalContext.current
-    val repository = remember(context) { createConsentRepository(context) }
-    val viewModel: ConsentViewModel = viewModel(factory = ConsentViewModel.factory(repository))
+    val consentRepository = remember(context) { createConsentRepository(context) }
+    val application = context.applicationContext as PageBinderApplication
+    val viewModel: ConsentViewModel = viewModel(factory = ConsentViewModel.factory(consentRepository))
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     PageBinderApp(
         uiState = uiState,
         onAgree = viewModel::onAgree,
         onDecline = viewModel::onDecline,
+        bookProjectRepository = application.bookProjectRepository,
+        pageRepository = application.pageRepository,
+        pageThumbnailLoader = application.pageThumbnailLoader,
+        enqueueProjectOcr = application.ocrQueue::enqueueProject,
     )
 }
