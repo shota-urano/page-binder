@@ -59,7 +59,7 @@
 | `INTERNET` 権限 / AccessibilityService | 追加・宣言・実装禁止（ビルド時テストで検査） | [01](./01-architecture.md) [04](./04-capture-session.md) |
 | 自動ページ送り | 実装しない（dispatchGesture 等は将来検討でも禁止） | [06](./06-auto-capture.md) |
 | FLAG_SECURE・DRM回避 | 実装しない。黒画面は明示エラー・回避案内なし | [07](./07-image-quality.md) [12](./12-legal-guardrails.md) |
-| 撮影開始順序 | 許可取得→FGS→MediaProjection→VirtualDisplay→Callback（再利用禁止） | [04](./04-capture-session.md) |
+| 撮影開始順序 | 許可取得→FGS→MediaProjection→Callback→VirtualDisplay（再利用禁止） | [04](./04-capture-session.md) |
 | OCRエンジン | ML Kit Text Recognition v2 Japanese（bundled・DL不要） | [09](./09-ocr.md) |
 | PDFエンジン | PDFBox-Android 第一候補（Phase 0 スパイク合格が条件） | [10](./10-searchable-pdf.md) |
 | 同梱フォント | Noto Sans JP（OFL）・サブセット埋め込み | [10](./10-searchable-pdf.md) |

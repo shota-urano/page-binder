@@ -10,10 +10,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pagebinder.app.capture.CaptureForegroundService
 import com.pagebinder.app.data.createConsentRepository
+import com.pagebinder.app.domain.CaptureMode
 import com.pagebinder.app.ui.PageBinderApp
 import com.pagebinder.app.ui.consent.ConsentViewModel
 import com.pagebinder.app.ui.theme.PageBinderTheme
+import com.pagebinder.app.ui.captureprep.CaptureMode as UiCaptureMode
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,5 +46,17 @@ private fun PageBinderRoot() {
         pageRepository = application.pageRepository,
         pageThumbnailLoader = application.pageThumbnailLoader,
         enqueueProjectOcr = application.ocrQueue::enqueueProject,
+        startCapture = { request ->
+            CaptureForegroundService.start(
+                context = context,
+                resultCode = request.resultCode,
+                resultData = request.permissionData,
+                mode =
+                    when (request.mode) {
+                        UiCaptureMode.MANUAL -> CaptureMode.MANUAL
+                        UiCaptureMode.CONTINUOUS -> CaptureMode.CONTINUOUS
+                    },
+            )
+        },
     )
 }

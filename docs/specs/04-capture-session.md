@@ -26,10 +26,10 @@ Android 14以降の制約に従い、次の順序を厳守する（AGENTS.md ル
 1. OSの画面共有許可を取得する（`MediaProjectionManager.createScreenCaptureIntent()`）
 2. `mediaProjection` 種別のフォアグラウンドサービスを開始する
 3. `MediaProjection` を取得する
-4. `VirtualDisplay` を**1回**生成する
-5. `MediaProjection.Callback` を登録する
+4. `MediaProjection.Callback` を登録する
+5. `VirtualDisplay` を**1回**生成する
 
-**許可Intent・`MediaProjection` インスタンスを再利用しない**。セッションごとにOS標準画面で許可を取り直す（FR-SES-001）。
+Android 14以降は `createVirtualDisplay()` 前に Callback を登録する。**許可Intent・`MediaProjection` インスタンスを再利用しない**。セッションごとにOS標準画面で許可を取り直す（FR-SES-001）。
 
 ### 3.2 権限フロー（撮影準備画面 §9.4）
 

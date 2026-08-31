@@ -3,6 +3,14 @@
 
     <application>
         <activity
+            android:name=".spike.capture.MediaProjectionSpikeActivity"
+            android:exported="true"
+            android:theme="@style/Theme.PageBinder" />
+        <service
+            android:name=".spike.capture.MediaProjectionSpikeService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+        <activity
             android:name=".spike.saf.SafPickerSpikeActivity"
             android:exported="false" />
         <!-- debug 専用の書き出し画面プレビュー（実機での目視・スクリーンショット用） -->
