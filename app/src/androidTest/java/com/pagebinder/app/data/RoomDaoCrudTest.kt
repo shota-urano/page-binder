@@ -4,6 +4,10 @@ import android.database.sqlite.SQLiteConstraintException
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.pagebinder.app.domain.ExportState
+import com.pagebinder.app.domain.ExportType
+import com.pagebinder.app.domain.PageOcrState
+import com.pagebinder.app.domain.PageQualityState
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -12,6 +16,8 @@ import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.time.Instant
+import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
 class RoomDaoCrudTest {
@@ -38,13 +44,16 @@ class RoomDaoCrudTest {
             val project = bookProjectEntity()
 
             dao.insertWithFileArea(project) {}
-            assertEquals(project, dao.findById(project.id))
+            assertEquals(project, dao.findById(project.id.toString()))
 
-            assertEquals(1, dao.updateMetadata(project.id, "Updated", "Author", "Note", "2026-09-01T00:01:00Z"))
-            assertEquals("Updated", dao.findById(project.id)?.title)
+            assertEquals(
+                1,
+                dao.updateMetadata(project.id.toString(), "Updated", "Author", "Note", "2026-09-01T00:01:00Z"),
+            )
+            assertEquals("Updated", dao.findById(project.id.toString())?.title)
 
-            assertEquals(true, dao.deleteWithFileArea(project.id) {})
-            assertNull(dao.findById(project.id))
+            assertEquals(true, dao.deleteWithFileArea(project.id.toString()) {})
+            assertNull(dao.findById(project.id.toString()))
         }
 
     @Test
@@ -55,20 +64,20 @@ class RoomDaoCrudTest {
 
             database.bookProjectDao().insertWithFileArea(bookProjectEntity()) {}
             dao.insert(page)
-            assertEquals(page, dao.findById(page.id))
+            assertEquals(page, dao.findById(page.id.toString()))
 
-            dao.updateRotation(page.id, 90)
-            assertEquals(90, dao.findById(page.id)?.rotation)
+            dao.updateRotation(page.id.toString(), 90)
+            assertEquals(90, dao.findById(page.id.toString())?.rotation)
 
-            dao.deleteAndCompact(page.projectId, setOf(page.id))
-            assertNull(dao.findById(page.id))
+            dao.deleteAndCompact(page.projectId.toString(), setOf(page.id.toString()))
+            assertNull(dao.findById(page.id.toString()))
         }
 
     @Test
     fun pageDaoRejectsPageWhoseProjectDoesNotExist() {
         assertThrows(SQLiteConstraintException::class.java) {
             runBlocking {
-                database.pageDao().insert(pageEntity(projectId = UNKNOWN_PROJECT_ID))
+                database.pageDao().insert(pageEntity(projectId = UUID.fromString(UNKNOWN_PROJECT_ID)))
             }
         }
     }
@@ -81,13 +90,13 @@ class RoomDaoCrudTest {
             val result = ocrResultEntity()
 
             ocrJobDao.upsertResult(result)
-            assertEquals(result, dao.findByPageId(result.pageId))
+            assertEquals(result, dao.findByPageId(result.pageId.toString()))
 
-            assertEquals(1, dao.updateEditedText(result.pageId, "Edited text"))
-            assertEquals("Edited text", dao.findByPageId(result.pageId)?.editedText)
+            assertEquals(1, dao.updateEditedText(result.pageId.toString(), "Edited text"))
+            assertEquals("Edited text", dao.findByPageId(result.pageId.toString())?.editedText)
 
-            assertEquals(1, dao.deleteByPageId(result.pageId))
-            assertNull(dao.findByPageId(result.pageId))
+            assertEquals(1, dao.deleteByPageId(result.pageId.toString()))
+            assertNull(dao.findByPageId(result.pageId.toString()))
         }
 
     @Test
@@ -97,48 +106,48 @@ class RoomDaoCrudTest {
             val record = exportRecordEntity()
 
             dao.insert(record)
-            assertEquals(record, dao.findById(record.id))
+            assertEquals(record, dao.findById(record.id.toString()))
 
             assertEquals(
                 1,
                 dao.compareAndSet(
-                    expectedId = record.id,
-                    expectedProjectId = record.projectId,
-                    expectedType = record.type,
+                    expectedId = record.id.toString(),
+                    expectedProjectId = record.projectId.toString(),
+                    expectedType = record.type.serializedName,
                     expectedTargetUri = record.targetUri,
-                    expectedState = record.state,
-                    expectedCreatedAt = record.createdAt,
-                    expectedCompletedAt = record.completedAt,
+                    expectedState = record.state.serializedName,
+                    expectedCreatedAt = record.createdAt.toString(),
+                    expectedCompletedAt = record.completedAt?.toString(),
                     expectedErrorCode = record.errorCode,
-                    updatedProjectId = record.projectId,
-                    updatedType = record.type,
+                    updatedProjectId = record.projectId.toString(),
+                    updatedType = record.type.serializedName,
                     updatedTargetUri = "content://provider/document/redacted",
                     updatedState = "running",
-                    updatedCreatedAt = record.createdAt,
+                    updatedCreatedAt = record.createdAt.toString(),
                     updatedCompletedAt = null,
                     updatedErrorCode = null,
                 ),
             )
-            assertEquals("running", dao.findById(record.id)?.state)
+            assertEquals(ExportState.RUNNING, dao.findById(record.id.toString())?.state)
 
-            assertEquals(1, dao.deleteById(record.id))
-            assertNull(dao.findById(record.id))
+            assertEquals(1, dao.deleteById(record.id.toString()))
+            assertNull(dao.findById(record.id.toString()))
         }
 
     private fun bookProjectEntity() =
         BookProjectEntity(
-            id = PROJECT_ID,
+            id = UUID.fromString(PROJECT_ID),
             title = "Test project",
             author = null,
             note = null,
-            createdAt = CREATED_AT,
-            updatedAt = CREATED_AT,
+            createdAt = Instant.parse(CREATED_AT),
+            updatedAt = Instant.parse(CREATED_AT),
             deletedAt = null,
         )
 
-    private fun pageEntity(projectId: String = PROJECT_ID) =
+    private fun pageEntity(projectId: UUID = UUID.fromString(PROJECT_ID)) =
         PageEntity(
-            id = PAGE_ID,
+            id = UUID.fromString(PAGE_ID),
             projectId = projectId,
             sequence = 1,
             originalImagePath = "projects/$projectId/images/$PAGE_ID.webp",
@@ -149,32 +158,32 @@ class RoomDaoCrudTest {
             cropTop = 0f,
             cropRight = 1f,
             cropBottom = 1f,
-            capturedAt = CREATED_AT,
+            capturedAt = Instant.parse(CREATED_AT),
             contentHash = "content-hash",
             perceptualHash = "perceptual-hash",
-            qualityState = "normal",
-            ocrState = "pending",
+            qualityState = PageQualityState.NORMAL,
+            ocrState = PageOcrState.PENDING,
         )
 
     private fun ocrResultEntity() =
         OcrResultEntity(
-            pageId = PAGE_ID,
+            pageId = UUID.fromString(PAGE_ID),
             fullText = "Recognized text",
             blocksJson = "{\"schemaVersion\":1,\"blocks\":[]}",
             editedText = null,
             engineVersion = "test-engine",
             sourceImageHash = "source-hash",
-            processedAt = CREATED_AT,
+            processedAt = Instant.parse(CREATED_AT),
         )
 
     private fun exportRecordEntity() =
         ExportRecordEntity(
-            id = EXPORT_ID,
-            projectId = PROJECT_ID,
-            type = "markdown",
+            id = UUID.fromString(EXPORT_ID),
+            projectId = UUID.fromString(PROJECT_ID),
+            type = ExportType.MARKDOWN,
             targetUri = null,
-            state = "queued",
-            createdAt = CREATED_AT,
+            state = ExportState.QUEUED,
+            createdAt = Instant.parse(CREATED_AT),
             completedAt = null,
             errorCode = null,
         )

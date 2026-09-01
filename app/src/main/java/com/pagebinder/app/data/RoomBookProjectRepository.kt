@@ -289,7 +289,7 @@ class RoomBookProjectRepository(
         BookProjectSummary(
             project = project.toDomain(),
             pageCount = pageCount,
-            storageBytes = fileStore.sizeBytes(UUID.fromString(project.id)),
+            storageBytes = fileStore.sizeBytes(project.id),
             ocrCompletedCount = ocrCompletedCount,
             ocrErrorCount = ocrErrorCount,
         )
@@ -314,25 +314,3 @@ private fun String.normalizedForSearch(): String =
         .normalize(this, Normalizer.Form.NFKC)
         .lowercase(Locale.ROOT)
         .trim()
-
-private fun BookProject.toEntity() =
-    BookProjectEntity(
-        id = id.toString(),
-        title = title,
-        author = author,
-        note = note,
-        createdAt = createdAt.toString(),
-        updatedAt = updatedAt.toString(),
-        deletedAt = deletedAt?.toString(),
-    )
-
-private fun BookProjectEntity.toDomain() =
-    BookProject(
-        id = UUID.fromString(id),
-        title = title,
-        author = author,
-        note = note,
-        createdAt = Instant.parse(createdAt),
-        updatedAt = Instant.parse(updatedAt),
-        deletedAt = deletedAt?.let(Instant::parse),
-    )

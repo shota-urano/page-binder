@@ -1,12 +1,12 @@
 package com.pagebinder.app.ocr
 
-import android.app.Instrumentation
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.work.Configuration
@@ -18,6 +18,7 @@ import com.pagebinder.app.TestPageBinderApplication
 import com.pagebinder.app.data.BookProjectEntity
 import com.pagebinder.app.data.OcrJobDao
 import com.pagebinder.app.data.OcrResultEntity
+import com.pagebinder.app.data.PageBinderTypeConverters
 import com.pagebinder.app.data.PageEntity
 import com.pagebinder.app.data.RoomOcrJobRepository
 import com.pagebinder.app.domain.OcrExecutionPolicy
@@ -25,6 +26,8 @@ import com.pagebinder.app.domain.OcrGateway
 import com.pagebinder.app.domain.OcrImageSource
 import com.pagebinder.app.domain.OcrJobRunner
 import com.pagebinder.app.domain.OcrOutput
+import com.pagebinder.app.domain.PageOcrState
+import com.pagebinder.app.domain.PageQualityState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -69,12 +72,12 @@ class OcrWorkerRestartTest {
             val firstDatabase = openDatabase()
             firstDatabase.setupDao().insertProject(
                 BookProjectEntity(
-                    id = PROJECT_ID,
+                    id = UUID.fromString(PROJECT_ID),
                     title = "Test project",
                     author = null,
                     note = null,
-                    createdAt = "2026-08-27T00:00:00Z",
-                    updatedAt = "2026-08-27T00:00:00Z",
+                    createdAt = Instant.parse("2026-08-27T00:00:00Z"),
+                    updatedAt = Instant.parse("2026-08-27T00:00:00Z"),
                     deletedAt = null,
                 ),
             )
@@ -104,11 +107,7 @@ class OcrWorkerRestartTest {
                     now = { Instant.parse("2026-08-27T01:00:00Z") },
                 )
 
-            val restartedApplication =
-                Instrumentation
-                    .newApplication(TestPageBinderApplication::class.java, targetContext)
-                    .let { it as TestPageBinderApplication }
-            instrumentation.callApplicationOnCreate(restartedApplication)
+            (targetContext.applicationContext as TestPageBinderApplication).ocrQueueScheduler.wake()
 
             val workManager = WorkManager.getInstance(targetContext)
             val startupWork = workManager.getWorkInfosForUniqueWork(OcrWorker.UNIQUE_WORK_NAME).get().single()
@@ -136,8 +135,8 @@ class OcrWorkerRestartTest {
         state: String,
         sequence: Int,
     ) = PageEntity(
-        id = id,
-        projectId = PROJECT_ID,
+        id = UUID.fromString(id),
+        projectId = UUID.fromString(PROJECT_ID),
         sequence = sequence,
         originalImagePath = "projects/project/images/$id.webp",
         width = 100,
@@ -147,11 +146,11 @@ class OcrWorkerRestartTest {
         cropTop = 0f,
         cropRight = 1f,
         cropBottom = 1f,
-        capturedAt = "2026-08-27T00:00:0${sequence}Z",
+        capturedAt = Instant.parse("2026-08-27T00:00:0${sequence}Z"),
         contentHash = "content-$sequence",
         perceptualHash = "perceptual-$sequence",
-        qualityState = "accepted",
-        ocrState = state,
+        qualityState = PageQualityState.NORMAL,
+        ocrState = PageOcrState.entries.single { it.serializedName == state },
     )
 }
 
@@ -175,6 +174,7 @@ internal interface TestOcrSetupDao {
     version = 1,
     exportSchema = false,
 )
+@TypeConverters(PageBinderTypeConverters::class)
 internal abstract class TestOcrDatabase : RoomDatabase() {
     abstract fun ocrJobDao(): OcrJobDao
 
