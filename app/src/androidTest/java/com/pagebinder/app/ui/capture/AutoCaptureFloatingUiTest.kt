@@ -1,6 +1,7 @@
 package com.pagebinder.app.ui.capture
 
 import android.app.Notification
+import android.app.NotificationManager
 import android.view.View
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
@@ -12,9 +13,10 @@ import com.pagebinder.app.domain.AutoCaptureStopReason
 import com.pagebinder.app.domain.CaptureOverlayState
 import com.pagebinder.app.preview.FloatingUiPreviewActivity
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -30,6 +32,21 @@ import org.junit.runner.RunWith
 class AutoCaptureFloatingUiTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
+    /**
+     * Android 13 以降、`POST_NOTIFICATIONS` が未許可だと通知は一切出ない。
+     * production は撮影準備画面で要求し（ui/captureprep/CapturePrepRoute.kt）、
+     * プレビュー画面も同じ許可を要求するが、テストでは許可ダイアログを挟まずに済ませる。
+     */
+    @Before
+    fun grantNotificationPermission() {
+        InstrumentationRegistry
+            .getInstrumentation()
+            .uiAutomation
+            .executeShellCommand("pm grant ${context.packageName} android.permission.POST_NOTIFICATIONS")
+            .close()
+        waitForIdle()
+    }
+
     @Test
     fun `連続撮影中と保存枚数がオーバーレイに出る`() {
         ActivityScenario.launch(FloatingUiPreviewActivity::class.java).use { scenario ->
@@ -42,7 +59,7 @@ class AutoCaptureFloatingUiTest {
 
                 val count = activity.findViewById<TextView>(R.id.capture_overlay_count)
                 assertTrue(count.isShown)
-                assertNotEquals(string(R.string.capture_overlay_saved_count, 0), count.text.toString())
+                assertEquals(string(R.string.capture_overlay_saved_count, savedCount(activity)), count.text.toString())
 
                 // 連続モードでは撮影ボタンを出さず、一時停止・停止だけを出す（docs/design/06-floating-ui.md）
                 assertTrue(activity.findViewById<View>(R.id.capture_overlay_pause_button).isShown)
@@ -90,6 +107,43 @@ class AutoCaptureFloatingUiTest {
     }
 
     @Test
+    fun `保存枚数はサンプル値の固定表示ではなく操作で増える`() {
+        ActivityScenario.launch(FloatingUiPreviewActivity::class.java).use { scenario ->
+            waitForIdle()
+            // 進み続けるカウンタを止めてから数える（一時停止中は自動で増えない）
+            clickPause(scenario)
+
+            var before = 0
+            scenario.onActivity { activity -> before = savedCount(activity) }
+            scenario.onActivity { activity ->
+                activity.findViewById<View>(R.id.capture_overlay_count).performClick()
+            }
+            waitForIdle()
+            scenario.onActivity { activity ->
+                val after = savedCount(activity)
+                assertTrue("枚数が増えていない: before=$before after=$after", after > before)
+                val count = activity.findViewById<TextView>(R.id.capture_overlay_count)
+                assertEquals(string(R.string.capture_overlay_saved_count, after), count.text.toString())
+            }
+        }
+    }
+
+    @Test
+    fun `連続撮影中は通知シェードに出る常駐通知が実際に立っている`() {
+        ActivityScenario.launch(FloatingUiPreviewActivity::class.java).use { scenario ->
+            waitForIdle()
+            scenario.onActivity { }
+
+            val manager = context.getSystemService(NotificationManager::class.java)
+            val posted =
+                manager.activeNotifications.firstOrNull { it.id == CaptureStatusNotifier.NOTIFICATION_ID }
+            assertNotNull("撮影中の常駐通知が出ていない", posted)
+            val text = posted!!.notification.text()
+            assertTrue(text, text.contains(string(R.string.capture_notification_continuous)))
+        }
+    }
+
+    @Test
     fun `連続撮影中と保存枚数が通知にも出る`() {
         val notifier = CaptureStatusNotifier(context)
 
@@ -118,6 +172,12 @@ class AutoCaptureFloatingUiTest {
 
         // 利用者が停止ボタンで止めたときは、自動停止の通知を出さない
         assertNull(notifier.buildAutoStopped(AutoCaptureStopReason.EXPLICIT))
+    }
+
+    /** 表示中の「%d枚」から数だけを取り出す */
+    private fun savedCount(activity: FloatingUiPreviewActivity): Int {
+        val shown = activity.findViewById<TextView>(R.id.capture_overlay_count).text.toString()
+        return shown.filter(Char::isDigit).toInt()
     }
 
     private fun Notification.text(): String = extras.getCharSequence(Notification.EXTRA_TEXT).toString()
