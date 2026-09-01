@@ -4,6 +4,8 @@ import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pagebinder.app.domain.OcrState
+import com.pagebinder.app.domain.PageOcrState
+import com.pagebinder.app.domain.PageQualityState
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -29,12 +31,12 @@ class RoomOcrJobRepositoryBlackPageTest {
         runBlocking {
             database.bookProjectDao().insertWithFileArea(
                 BookProjectEntity(
-                    id = projectId.toString(),
+                    id = projectId,
                     title = "Test project",
                     author = null,
                     note = null,
-                    createdAt = Instant.EPOCH.toString(),
-                    updatedAt = Instant.EPOCH.toString(),
+                    createdAt = Instant.EPOCH,
+                    updatedAt = Instant.EPOCH,
                     deletedAt = null,
                 ),
             ) {}
@@ -54,8 +56,14 @@ class RoomOcrJobRepositoryBlackPageTest {
             database.pageDao().insert(page("20000000-0000-0000-0000-000000000002", "normal", "failed"))
 
             assertEquals(1, repository.markProjectPending(projectId, setOf(OcrState.FAILED)))
-            assertEquals("failed", database.pageDao().findById("20000000-0000-0000-0000-000000000001")?.ocrState)
-            assertEquals("pending", database.pageDao().findById("20000000-0000-0000-0000-000000000002")?.ocrState)
+            assertEquals(
+                PageOcrState.FAILED,
+                database.pageDao().findById("20000000-0000-0000-0000-000000000001")?.ocrState,
+            )
+            assertEquals(
+                PageOcrState.PENDING,
+                database.pageDao().findById("20000000-0000-0000-0000-000000000002")?.ocrState,
+            )
         }
 
     @Test
@@ -65,7 +73,7 @@ class RoomOcrJobRepositoryBlackPageTest {
             database.pageDao().insert(page(id, "black", "failed"))
 
             assertEquals(false, repository.markPending(UUID.fromString(id), setOf(OcrState.FAILED)))
-            assertEquals("failed", database.pageDao().findById(id)?.ocrState)
+            assertEquals(PageOcrState.FAILED, database.pageDao().findById(id)?.ocrState)
         }
 
     @Test
@@ -83,9 +91,9 @@ class RoomOcrJobRepositoryBlackPageTest {
             database.pageDao().insert(page(id, "black", "running"))
 
             assertEquals(0, repository.recoverInterrupted())
-            assertEquals("running", database.pageDao().findById(id)?.ocrState)
+            assertEquals(PageOcrState.RUNNING, database.pageDao().findById(id)?.ocrState)
             assertEquals(false, repository.returnToPending(UUID.fromString(id)))
-            assertEquals("running", database.pageDao().findById(id)?.ocrState)
+            assertEquals(PageOcrState.RUNNING, database.pageDao().findById(id)?.ocrState)
         }
 
     private fun page(
@@ -93,8 +101,8 @@ class RoomOcrJobRepositoryBlackPageTest {
         qualityState: String,
         ocrState: String,
     ) = PageEntity(
-        id = id,
-        projectId = projectId.toString(),
+        id = UUID.fromString(id),
+        projectId = projectId,
         sequence = if (qualityState == "black") 1 else 2,
         originalImagePath = "projects/$projectId/images/$id.webp",
         width = 1,
@@ -104,10 +112,10 @@ class RoomOcrJobRepositoryBlackPageTest {
         cropTop = 0f,
         cropRight = 1f,
         cropBottom = 1f,
-        capturedAt = Instant.EPOCH.toString(),
+        capturedAt = Instant.EPOCH,
         contentHash = id,
         perceptualHash = "0000000000000000",
-        qualityState = qualityState,
-        ocrState = ocrState,
+        qualityState = PageQualityState.entries.single { it.serializedName == qualityState },
+        ocrState = PageOcrState.entries.single { it.serializedName == ocrState },
     )
 }

@@ -3,9 +3,12 @@ package com.pagebinder.app.data
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pagebinder.app.domain.BookProjectRepositoryException
+import com.pagebinder.app.domain.PageOcrState
+import com.pagebinder.app.domain.PageQualityState
 import com.pagebinder.app.storage.ProjectFileStore
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -139,8 +142,8 @@ private fun testPage(
     ocrState: String = "pending",
     qualityState: String = "normal",
 ) = PageEntity(
-    id = "20000000-0000-0000-0000-${sequence.toString().padStart(12, '0')}",
-    projectId = projectId.toString(),
+    id = UUID.fromString("20000000-0000-0000-0000-${sequence.toString().padStart(12, '0')}"),
+    projectId = projectId,
     sequence = sequence,
     originalImagePath = "projects/$projectId/images/$sequence.webp",
     width = 100,
@@ -150,11 +153,11 @@ private fun testPage(
     cropTop = 0f,
     cropRight = 1f,
     cropBottom = 1f,
-    capturedAt = "2026-08-30T00:00:00Z",
+    capturedAt = Instant.parse("2026-08-30T00:00:00Z"),
     contentHash = "content-$sequence",
     perceptualHash = "perceptual-$sequence",
-    qualityState = qualityState,
-    ocrState = ocrState,
+    qualityState = PageQualityState.entries.single { it.serializedName == qualityState },
+    ocrState = PageOcrState.entries.single { it.serializedName == ocrState },
 )
 
 @Database(
@@ -167,6 +170,7 @@ private fun testPage(
     version = 1,
     exportSchema = false,
 )
+@TypeConverters(PageBinderTypeConverters::class)
 abstract class TestBookProjectDatabase : RoomDatabase() {
     abstract fun bookProjectDao(): BookProjectDao
 

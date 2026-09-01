@@ -4,7 +4,6 @@ import androidx.room.Dao
 import androidx.room.Query
 import com.pagebinder.app.domain.OcrResultRepository
 import com.pagebinder.app.domain.StoredOcrResult
-import java.time.Instant
 import java.util.UUID
 
 /**
@@ -41,14 +40,3 @@ class RoomOcrResultRepository(
 
     override suspend fun clearEditedText(pageId: UUID): Boolean = dao.updateEditedText(pageId.toString(), null) == 1
 }
-
-private fun OcrResultEntity.toDomain() =
-    StoredOcrResult(
-        pageId = UUID.fromString(pageId),
-        fullText = fullText,
-        blocksJson = blocksJson,
-        editedText = editedText,
-        engineVersion = engineVersion,
-        sourceImageHash = sourceImageHash,
-        processedAt = Instant.parse(processedAt),
-    )

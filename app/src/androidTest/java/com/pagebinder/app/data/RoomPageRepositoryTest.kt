@@ -5,6 +5,7 @@ import androidx.room.Database
 import androidx.room.Insert
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pagebinder.app.domain.Page
@@ -43,12 +44,12 @@ class RoomPageRepositoryTest {
         runBlocking {
             database.projectDao().insert(
                 BookProjectEntity(
-                    id = projectId.toString(),
+                    id = projectId,
                     title = "Test project",
                     author = null,
                     note = null,
-                    createdAt = "2026-08-27T01:02:03Z",
-                    updatedAt = "2026-08-27T01:02:03Z",
+                    createdAt = Instant.parse("2026-08-27T01:02:03Z"),
+                    updatedAt = Instant.parse("2026-08-27T01:02:03Z"),
                     deletedAt = null,
                 ),
             )
@@ -263,6 +264,7 @@ class RoomPageRepositoryTest {
     version = 1,
     exportSchema = false,
 )
+@TypeConverters(PageBinderTypeConverters::class)
 abstract class TestPageDatabase : RoomDatabase() {
     abstract fun projectDao(): TestProjectDao
 
