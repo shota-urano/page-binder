@@ -67,7 +67,12 @@ class OcrWorkerRestartTest {
     }
 
     @Test
-    fun applicationStartupReschedulesAndRecoversJobsAfterDatabaseReopen() =
+    fun applicationOnCreateWakesTheOcrQueue() {
+        assertEquals(1, TestPageBinderApplication.processStartWakeCalls())
+    }
+
+    @Test
+    fun queueWakeReschedulesAndRecoversJobsAfterDatabaseReopen() =
         runBlocking {
             val firstDatabase = openDatabase()
             firstDatabase.setupDao().insertProject(
@@ -107,7 +112,7 @@ class OcrWorkerRestartTest {
                     now = { Instant.parse("2026-08-27T01:00:00Z") },
                 )
 
-            (targetContext.applicationContext as TestPageBinderApplication).ocrQueueScheduler.wake()
+            WorkManagerOcrQueueScheduler(targetContext).wake()
 
             val workManager = WorkManager.getInstance(targetContext)
             val startupWork = workManager.getWorkInfosForUniqueWork(OcrWorker.UNIQUE_WORK_NAME).get().single()

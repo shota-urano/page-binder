@@ -23,6 +23,7 @@ import com.pagebinder.app.domain.CaptureStopReason
 import com.pagebinder.app.domain.OcrImageSource
 import com.pagebinder.app.domain.OcrJobRunner
 import com.pagebinder.app.domain.OcrQueue
+import com.pagebinder.app.domain.OcrQueueScheduler
 import com.pagebinder.app.domain.PageRepository
 import com.pagebinder.app.image.FileCaptureImageStore
 import com.pagebinder.app.image.FilePageThumbnailLoader
@@ -52,19 +53,22 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
     }
     val pageRepository: PageRepository by lazy { RoomPageRepository(database.pageDao()) }
     val pageThumbnailLoader by lazy { FilePageThumbnailLoader(filesDir, pageRepository) }
-    val ocrQueueScheduler by lazy { WorkManagerOcrQueueScheduler(this) }
+    val ocrQueueScheduler by lazy { createOcrQueueScheduler() }
+    private val ocrQueueSessionLifecycle: CaptureSessionLifecycle by lazy {
+        ocrQueueScheduler as CaptureSessionLifecycle
+    }
     val ocrQueue by lazy { OcrQueue(repository, ocrQueueScheduler) }
     val captureSessionLifecycle: CaptureSessionLifecycle by lazy {
         object : CaptureSessionLifecycle {
             override fun onSessionActive() {
-                ocrQueueScheduler.onSessionActive()
+                ocrQueueSessionLifecycle.onSessionActive()
             }
 
             override fun onSessionIdle() {
                 // This is invoked by the coordinator for every stop reason, including an OS
                 // MediaProjection callback, independently of the service StateFlow observer.
                 capturePageController.clear()
-                ocrQueueScheduler.onSessionIdle()
+                ocrQueueSessionLifecycle.onSessionIdle()
             }
         }
     }
@@ -149,6 +153,9 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
         super.onCreate()
         ocrQueueScheduler.wake()
     }
+
+    /** Allows the instrumentation application to observe the process-start wake without WorkManager. */
+    protected open fun createOcrQueueScheduler(): OcrQueueScheduler = WorkManagerOcrQueueScheduler(this)
 
     private companion object {
         const val DATABASE_NAME = "pagebinder.db"
