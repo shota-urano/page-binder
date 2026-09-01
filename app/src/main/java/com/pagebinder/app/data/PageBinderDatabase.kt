@@ -4,6 +4,7 @@ import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
+import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -11,6 +12,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.pagebinder.app.domain.OcrCrop
 import com.pagebinder.app.domain.OcrJobRepository
 import com.pagebinder.app.domain.OcrPage
@@ -32,6 +35,15 @@ data class BookProjectEntity(
 
 @Entity(
     tableName = "pages",
+    foreignKeys = [
+        ForeignKey(
+            entity = BookProjectEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["project_id"],
+            onDelete = ForeignKey.NO_ACTION,
+            onUpdate = ForeignKey.NO_ACTION,
+        ),
+    ],
     indices = [Index(value = ["project_id", "sequence"], unique = true)],
 )
 data class PageEntity(
@@ -150,7 +162,7 @@ interface OcrJobDao {
 
 @Database(
     entities = [BookProjectEntity::class, PageEntity::class, OcrResultEntity::class, ExportRecordEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class PageBinderDatabase : RoomDatabase() {
@@ -163,6 +175,61 @@ abstract class PageBinderDatabase : RoomDatabase() {
     abstract fun ocrResultDao(): OcrResultDao
 
     abstract fun exportRecordDao(): ExportRecordDao
+
+    companion object {
+        val MIGRATION_1_2: Migration =
+            object : Migration(1, 2) {
+                override fun migrate(database: SupportSQLiteDatabase) {
+                    database.execSQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS `pages_new` (
+                            `id` TEXT NOT NULL,
+                            `project_id` TEXT NOT NULL,
+                            `sequence` INTEGER NOT NULL,
+                            `original_image_path` TEXT NOT NULL,
+                            `width` INTEGER NOT NULL,
+                            `height` INTEGER NOT NULL,
+                            `rotation` INTEGER NOT NULL,
+                            `crop_left` REAL NOT NULL,
+                            `crop_top` REAL NOT NULL,
+                            `crop_right` REAL NOT NULL,
+                            `crop_bottom` REAL NOT NULL,
+                            `captured_at` TEXT NOT NULL,
+                            `content_hash` TEXT NOT NULL,
+                            `perceptual_hash` TEXT NOT NULL,
+                            `quality_state` TEXT NOT NULL,
+                            `ocr_state` TEXT NOT NULL,
+                            PRIMARY KEY(`id`),
+                            FOREIGN KEY(`project_id`) REFERENCES `book_projects`(`id`)
+                                ON UPDATE NO ACTION ON DELETE NO ACTION
+                        )
+                        """.trimIndent(),
+                    )
+                    database.execSQL(
+                        """
+                        INSERT INTO `pages_new` (
+                            `id`, `project_id`, `sequence`, `original_image_path`, `width`, `height`,
+                            `rotation`, `crop_left`, `crop_top`, `crop_right`, `crop_bottom`, `captured_at`,
+                            `content_hash`, `perceptual_hash`, `quality_state`, `ocr_state`
+                        )
+                        SELECT
+                            `id`, `project_id`, `sequence`, `original_image_path`, `width`, `height`,
+                            `rotation`, `crop_left`, `crop_top`, `crop_right`, `crop_bottom`, `captured_at`,
+                            `content_hash`, `perceptual_hash`, `quality_state`, `ocr_state`
+                        FROM `pages`
+                        """.trimIndent(),
+                    )
+                    database.execSQL("DROP TABLE `pages`")
+                    database.execSQL("ALTER TABLE `pages_new` RENAME TO `pages`")
+                    database.execSQL(
+                        """
+                        CREATE UNIQUE INDEX IF NOT EXISTS `index_pages_project_id_sequence`
+                        ON `pages` (`project_id`, `sequence`)
+                        """.trimIndent(),
+                    )
+                }
+            }
+    }
 }
 
 class RoomOcrJobRepository(

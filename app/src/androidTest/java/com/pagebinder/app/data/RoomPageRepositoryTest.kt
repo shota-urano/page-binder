@@ -1,6 +1,8 @@
 package com.pagebinder.app.data
 
+import androidx.room.Dao
 import androidx.room.Database
+import androidx.room.Insert
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -38,6 +40,19 @@ class RoomPageRepositoryTest {
                 InstrumentationRegistry.getInstrumentation().targetContext,
                 TestPageDatabase::class.java,
             ).build()
+        runBlocking {
+            database.projectDao().insert(
+                BookProjectEntity(
+                    id = projectId.toString(),
+                    title = "Test project",
+                    author = null,
+                    note = null,
+                    createdAt = "2026-08-27T01:02:03Z",
+                    updatedAt = "2026-08-27T01:02:03Z",
+                    deletedAt = null,
+                ),
+            )
+        }
         repository = RoomPageRepository(database.pageDao())
     }
 
@@ -244,10 +259,18 @@ class RoomPageRepositoryTest {
 }
 
 @Database(
-    entities = [PageEntity::class],
+    entities = [BookProjectEntity::class, PageEntity::class],
     version = 1,
     exportSchema = false,
 )
 abstract class TestPageDatabase : RoomDatabase() {
+    abstract fun projectDao(): TestProjectDao
+
     abstract fun pageDao(): PageDao
+}
+
+@Dao
+interface TestProjectDao {
+    @Insert
+    suspend fun insert(project: BookProjectEntity)
 }

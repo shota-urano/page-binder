@@ -1,5 +1,6 @@
 package com.pagebinder.app.data
 
+import android.database.sqlite.SQLiteConstraintException
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -7,6 +8,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -51,6 +53,7 @@ class RoomDaoCrudTest {
             val dao = database.pageDao()
             val page = pageEntity()
 
+            database.bookProjectDao().insertWithFileArea(bookProjectEntity()) {}
             dao.insert(page)
             assertEquals(page, dao.findById(page.id))
 
@@ -60,6 +63,15 @@ class RoomDaoCrudTest {
             dao.deleteAndCompact(page.projectId, setOf(page.id))
             assertNull(dao.findById(page.id))
         }
+
+    @Test
+    fun pageDaoRejectsPageWhoseProjectDoesNotExist() {
+        assertThrows(SQLiteConstraintException::class.java) {
+            runBlocking {
+                database.pageDao().insert(pageEntity(projectId = UNKNOWN_PROJECT_ID))
+            }
+        }
+    }
 
     @Test
     fun ocrResultDaoCreatesReadsUpdatesAndDeletes() =
@@ -124,12 +136,12 @@ class RoomDaoCrudTest {
             deletedAt = null,
         )
 
-    private fun pageEntity() =
+    private fun pageEntity(projectId: String = PROJECT_ID) =
         PageEntity(
             id = PAGE_ID,
-            projectId = PROJECT_ID,
+            projectId = projectId,
             sequence = 1,
-            originalImagePath = "projects/$PROJECT_ID/images/$PAGE_ID.webp",
+            originalImagePath = "projects/$projectId/images/$PAGE_ID.webp",
             width = 1080,
             height = 1920,
             rotation = 0,
@@ -171,6 +183,7 @@ class RoomDaoCrudTest {
         const val PROJECT_ID = "10000000-0000-0000-0000-000000000001"
         const val PAGE_ID = "20000000-0000-0000-0000-000000000002"
         const val EXPORT_ID = "30000000-0000-0000-0000-000000000003"
+        const val UNKNOWN_PROJECT_ID = "40000000-0000-0000-0000-000000000004"
         const val CREATED_AT = "2026-09-01T00:00:00Z"
     }
 }
