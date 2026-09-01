@@ -26,6 +26,19 @@ class RoomOcrJobRepositoryBlackPageTest {
                 InstrumentationRegistry.getInstrumentation().targetContext,
                 PageBinderDatabase::class.java,
             ).build()
+        runBlocking {
+            database.bookProjectDao().insertWithFileArea(
+                BookProjectEntity(
+                    id = projectId.toString(),
+                    title = "Test project",
+                    author = null,
+                    note = null,
+                    createdAt = Instant.EPOCH.toString(),
+                    updatedAt = Instant.EPOCH.toString(),
+                    deletedAt = null,
+                ),
+            ) {}
+        }
         repository = RoomOcrJobRepository(database.ocrJobDao())
     }
 

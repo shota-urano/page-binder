@@ -24,6 +24,9 @@ interface OcrResultDao {
         pageId: String,
         editedText: String?,
     ): Int
+
+    @Query("DELETE FROM ocr_results WHERE page_id = :pageId")
+    suspend fun deleteByPageId(pageId: String): Int
 }
 
 class RoomOcrResultRepository(

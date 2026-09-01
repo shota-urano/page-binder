@@ -15,6 +15,7 @@ import androidx.work.WorkManager
 import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.pagebinder.app.TestPageBinderApplication
+import com.pagebinder.app.data.BookProjectEntity
 import com.pagebinder.app.data.OcrJobDao
 import com.pagebinder.app.data.OcrResultEntity
 import com.pagebinder.app.data.PageEntity
@@ -66,6 +67,17 @@ class OcrWorkerRestartTest {
     fun applicationStartupReschedulesAndRecoversJobsAfterDatabaseReopen() =
         runBlocking {
             val firstDatabase = openDatabase()
+            firstDatabase.setupDao().insertProject(
+                BookProjectEntity(
+                    id = PROJECT_ID,
+                    title = "Test project",
+                    author = null,
+                    note = null,
+                    createdAt = "2026-08-27T00:00:00Z",
+                    updatedAt = "2026-08-27T00:00:00Z",
+                    deletedAt = null,
+                ),
+            )
             firstDatabase.setupDao().insertPages(
                 listOf(
                     pageEntity("10000000-0000-0000-0000-000000000001", "running", 1),
@@ -125,7 +137,7 @@ class OcrWorkerRestartTest {
         sequence: Int,
     ) = PageEntity(
         id = id,
-        projectId = "20000000-0000-0000-0000-000000000001",
+        projectId = PROJECT_ID,
         sequence = sequence,
         originalImagePath = "projects/project/images/$id.webp",
         width = 100,
@@ -146,6 +158,9 @@ class OcrWorkerRestartTest {
 @Dao
 internal interface TestOcrSetupDao {
     @Insert
+    suspend fun insertProject(project: BookProjectEntity)
+
+    @Insert
     suspend fun insertPages(pages: List<PageEntity>)
 
     @Query("SELECT ocr_state FROM pages ORDER BY sequence")
@@ -156,7 +171,7 @@ internal interface TestOcrSetupDao {
 }
 
 @Database(
-    entities = [PageEntity::class, OcrResultEntity::class],
+    entities = [BookProjectEntity::class, PageEntity::class, OcrResultEntity::class],
     version = 1,
     exportSchema = false,
 )
@@ -165,3 +180,5 @@ internal abstract class TestOcrDatabase : RoomDatabase() {
 
     abstract fun setupDao(): TestOcrSetupDao
 }
+
+private const val PROJECT_ID = "20000000-0000-0000-0000-000000000001"

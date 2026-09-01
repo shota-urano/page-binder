@@ -41,7 +41,10 @@ import kotlinx.coroutines.launch
 open class PageBinderApplication : Application(), OcrWorkerDependencies {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val database by lazy {
-        Room.databaseBuilder(this, PageBinderDatabase::class.java, DATABASE_NAME).build()
+        Room
+            .databaseBuilder(this, PageBinderDatabase::class.java, DATABASE_NAME)
+            .addMigrations(PageBinderDatabase.MIGRATION_1_2)
+            .build()
     }
     private val repository by lazy { RoomOcrJobRepository(database.ocrJobDao()) }
     val bookProjectRepository: BookProjectRepository by lazy {
