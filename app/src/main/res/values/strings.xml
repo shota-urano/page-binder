@@ -117,7 +117,12 @@
     <string name="capture_notification_title">PageBinderで画面撮影中</string>
     <string name="capture_notification_manual">手動撮影中</string>
     <string name="capture_notification_continuous">連続撮影中</string>
+    <string name="capture_notification_paused">一時停止中</string>
+    <!-- 連続撮影中の通知に保存枚数を添える（%1$s=撮影状態 / %2$d=保存枚数） -->
+    <string name="capture_notification_saved_count">%1$s ・ %2$d枚を保存しました</string>
     <string name="capture_notification_stop">停止</string>
+    <string name="capture_notification_auto_stopped_pages">最大ページ数に達したため連続撮影を終了しました</string>
+    <string name="capture_notification_auto_stopped_duration">最大時間に達したため連続撮影を終了しました</string>
     <string name="capture_notification_stopped_title">撮影を終了しました</string>
     <string name="capture_notification_stopped_message">画面共有が停止されたため、撮影セッションを安全に終了しました</string>
 

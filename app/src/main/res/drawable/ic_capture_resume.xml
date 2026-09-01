@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 一時停止中に一時停止ボタンが取る「再開」アイコン（素材なし。docs/design/06-floating-ui.md 未定事項） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M8,5.6 L18.4,11.2 A0.9,0.9 0 0 1 18.4,12.8 L8,18.4 A0.9,0.9 0 0 1 6.7,17.6 V6.4 A0.9,0.9 0 0 1 8,5.6 Z" />
+</vector>

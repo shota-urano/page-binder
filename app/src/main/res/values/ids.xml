@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- フローティングUI（docs/design/06-floating-ui.md）の部品。実機テストから引くために id を持たせる -->
+    <item name="capture_overlay_capture_button" type="id" />
+    <item name="capture_overlay_state_icon" type="id" />
+    <item name="capture_overlay_status" type="id" />
+    <item name="capture_overlay_count" type="id" />
+    <item name="capture_overlay_pause_button" type="id" />
+    <item name="capture_overlay_stop_button" type="id" />
+</resources>
