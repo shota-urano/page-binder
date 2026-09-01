@@ -80,6 +80,12 @@
     <string name="capture_prep_pages">枚</string>
     <string name="capture_prep_minutes">分</string>
     <string name="capture_prep_no_limit">—</string>
+    <string name="capture_prep_sound_title">撮影音</string>
+    <string name="capture_prep_sound_description">保存成功時に短い音を鳴らします（初期値：オフ）</string>
+    <string name="capture_prep_sensitivity">検出感度</string>
+    <string name="capture_prep_sensitivity_low">低</string>
+    <string name="capture_prep_sensitivity_medium">標準</string>
+    <string name="capture_prep_sensitivity_high">高</string>
     <string name="capture_prep_permissions">必要な許可</string>
     <string name="capture_prep_overlay_title">他のアプリの上に表示</string>
     <string name="capture_prep_overlay_description">撮影ボタンを画面に重ねて表示するために必要です</string>

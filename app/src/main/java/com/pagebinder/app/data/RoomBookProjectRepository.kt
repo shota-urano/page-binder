@@ -36,9 +36,9 @@ abstract class BookProjectDao {
     @Query(
         """
         SELECT book_projects.*,
-               COUNT(pages.id) AS pageCount,
+               COALESCE(SUM(CASE WHEN pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS pageCount,
                COALESCE(SUM(CASE WHEN pages.ocr_state = 'succeeded' THEN 1 ELSE 0 END), 0) AS ocrCompletedCount,
-               COALESCE(SUM(CASE WHEN pages.ocr_state = 'failed' THEN 1 ELSE 0 END), 0) AS ocrErrorCount
+               COALESCE(SUM(CASE WHEN pages.ocr_state = 'failed' AND pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS ocrErrorCount
         FROM book_projects
         LEFT JOIN pages ON pages.project_id = book_projects.id
         WHERE book_projects.deleted_at IS NULL
@@ -50,9 +50,9 @@ abstract class BookProjectDao {
     @Query(
         """
         SELECT book_projects.*,
-               COUNT(pages.id) AS pageCount,
+               COALESCE(SUM(CASE WHEN pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS pageCount,
                COALESCE(SUM(CASE WHEN pages.ocr_state = 'succeeded' THEN 1 ELSE 0 END), 0) AS ocrCompletedCount,
-               COALESCE(SUM(CASE WHEN pages.ocr_state = 'failed' THEN 1 ELSE 0 END), 0) AS ocrErrorCount
+               COALESCE(SUM(CASE WHEN pages.ocr_state = 'failed' AND pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS ocrErrorCount
         FROM book_projects
         LEFT JOIN pages ON pages.project_id = book_projects.id
         WHERE book_projects.deleted_at IS NOT NULL
@@ -65,9 +65,9 @@ abstract class BookProjectDao {
     @Query(
         """
         SELECT book_projects.*,
-               COUNT(pages.id) AS pageCount,
+               COALESCE(SUM(CASE WHEN pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS pageCount,
                COALESCE(SUM(CASE WHEN pages.ocr_state = 'succeeded' THEN 1 ELSE 0 END), 0) AS ocrCompletedCount,
-               COALESCE(SUM(CASE WHEN pages.ocr_state = 'failed' THEN 1 ELSE 0 END), 0) AS ocrErrorCount
+               COALESCE(SUM(CASE WHEN pages.ocr_state = 'failed' AND pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS ocrErrorCount
         FROM book_projects
         LEFT JOIN pages ON pages.project_id = book_projects.id
         WHERE book_projects.id = :id

@@ -97,6 +97,22 @@ class RoomBookProjectRepositoryTest {
             assertEquals(2, summary.ocrCompletedCount)
             assertEquals(1, summary.ocrErrorCount)
         }
+
+    @Test
+    fun blackCaptureDoesNotIncreaseOcrErrorCount() =
+        runBlocking {
+            val repository =
+                RoomBookProjectRepository(
+                    dao = database.bookProjectDao(),
+                    fileStore = EmptyProjectFileStore(),
+                    now = { Instant.parse("2026-08-30T00:00:00Z") },
+                    newId = { projectId },
+                )
+            repository.create("Black", null, null)
+            database.pageDao().insert(testPage(projectId, 1, ocrState = "failed", qualityState = "black"))
+
+            assertEquals(0, requireNotNull(repository.findSummaryById(projectId)).ocrErrorCount)
+        }
 }
 
 private object FailingProjectFileStore : ProjectFileStore {
@@ -121,6 +137,7 @@ private fun testPage(
     projectId: UUID,
     sequence: Int,
     ocrState: String = "pending",
+    qualityState: String = "normal",
 ) = PageEntity(
     id = "20000000-0000-0000-0000-${sequence.toString().padStart(12, '0')}",
     projectId = projectId.toString(),
@@ -136,7 +153,7 @@ private fun testPage(
     capturedAt = "2026-08-30T00:00:00Z",
     contentHash = "content-$sequence",
     perceptualHash = "perceptual-$sequence",
-    qualityState = "normal",
+    qualityState = qualityState,
     ocrState = ocrState,
 )
 
