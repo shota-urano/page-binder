@@ -5,6 +5,8 @@ import androidx.room.Room
 import com.pagebinder.app.capture.AndroidCaptureFeedbackGateway
 import com.pagebinder.app.capture.AndroidCaptureGateway
 import com.pagebinder.app.capture.CapturePageController
+import com.pagebinder.app.capture.CaptureStatusNotifier
+import com.pagebinder.app.capture.CaptureStatusPresenter
 import com.pagebinder.app.data.PageBinderDatabase
 import com.pagebinder.app.data.RoomBookProjectRepository
 import com.pagebinder.app.data.RoomOcrJobRepository
@@ -14,6 +16,7 @@ import com.pagebinder.app.data.createCaptureFeedbackSettingsRepository
 import com.pagebinder.app.domain.BookProjectRepository
 import com.pagebinder.app.domain.CaptureFeedbackController
 import com.pagebinder.app.domain.CaptureOnePage
+import com.pagebinder.app.domain.CaptureOverlayGateway
 import com.pagebinder.app.domain.CaptureSessionCoordinator
 import com.pagebinder.app.domain.CaptureSessionLifecycle
 import com.pagebinder.app.domain.CaptureStopReason
@@ -71,7 +74,7 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
     private val captureOnePage by lazy {
         CaptureOnePage(
             captureGateway = captureGateway,
-            overlayGateway = captureOverlayController,
+            overlayGateway = captureStatusPresenter,
             imageStore = FileCaptureImageStore(filesDir),
             pageRepository = pageRepository,
             ocrQueue = ocrQueue,
@@ -83,7 +86,7 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
             captureOnePage = captureOnePage,
             feedback = captureFeedbackController,
             captureGateway = captureGateway,
-            overlayGateway = captureOverlayController,
+            overlayGateway = captureStatusPresenter,
             settingsRepository = autoCaptureSettingsRepository,
             lastSavedFingerprint = { projectId ->
                 pageRepository
@@ -92,9 +95,10 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
                     ?.perceptualHash
             },
             stopSession = { captureSessionCoordinator.stop(CaptureStopReason.EXPLICIT) },
+            onAutoStopped = { reason -> captureStatusNotifier.postAutoStopped(reason) },
         )
     }
-    val captureOverlayController: CaptureOverlayController by lazy {
+    private val captureOverlayController: CaptureOverlayController by lazy {
         CaptureOverlayController(
             context = this,
             onCapture = {
@@ -111,11 +115,17 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
             },
         )
     }
+
+    /** 撮影状態はオーバーレイと常駐通知の両方に出す（docs/specs/06-auto-capture.md §3.4 / FR-AUTO-005） */
+    val captureStatusNotifier: CaptureStatusNotifier by lazy { CaptureStatusNotifier(this) }
+    private val captureStatusPresenter: CaptureOverlayGateway by lazy {
+        CaptureStatusPresenter(captureOverlayController, captureStatusNotifier::post)
+    }
     val captureSessionCoordinator: CaptureSessionCoordinator by lazy {
         CaptureSessionCoordinator(
             captureGateway = captureGateway,
             captureSessionLifecycle = captureSessionLifecycle,
-            overlayGateway = captureOverlayController,
+            overlayGateway = captureStatusPresenter,
             eventScope = applicationScope,
         )
     }

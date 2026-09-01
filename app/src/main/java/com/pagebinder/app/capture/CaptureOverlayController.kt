@@ -1,9 +1,7 @@
 package com.pagebinder.app.ui.overlay
 
 import android.content.Context
-import android.graphics.Color
 import android.graphics.PixelFormat
-import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -13,10 +11,6 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
-import com.pagebinder.app.R
 import com.pagebinder.app.domain.CaptureOverlayGateway
 import com.pagebinder.app.domain.CaptureOverlayState
 import kotlin.math.roundToInt
@@ -111,10 +105,8 @@ private class AndroidOverlayWindow(
     private val appContext = context.applicationContext
     private val windowManager = appContext.getSystemService(WindowManager::class.java)
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var view: LinearLayout? = null
+    private var content: CaptureOverlayContent? = null
     private var params: WindowManager.LayoutParams? = null
-    private var state: CaptureOverlayState = CaptureOverlayState.STOPPED
-    private var savedCount: Int = 0
 
     @Volatile
     private var desiredVisible = true
@@ -125,12 +117,13 @@ private class AndroidOverlayWindow(
     ) {
         desiredVisible = true
         mainHandler.post {
-            if (view != null || !Settings.canDrawOverlays(appContext)) return@post
-            this.state = state
-            this.savedCount = savedCount
-            val overlay = buildView()
+            if (content != null || !Settings.canDrawOverlays(appContext)) return@post
+            val overlayContent = CaptureOverlayContent(appContext, onCapture, onPauseChanged, onStop)
+            val overlay = overlayContent.view
+            overlay.setOnTouchListener(DragTouchListener())
+            overlayContent.render(state, savedCount)
             val layoutParams = newLayoutParams()
-            view = overlay
+            content = overlayContent
             params = layoutParams
             overlay.visibility = if (desiredVisible) View.VISIBLE else View.INVISIBLE
             windowManager.addView(overlay, layoutParams)
@@ -150,114 +143,21 @@ private class AndroidOverlayWindow(
         state: CaptureOverlayState,
         savedCount: Int,
     ) {
-        mainHandler.post {
-            this.state = state
-            this.savedCount = savedCount
-            view?.let(::render)
-        }
+        mainHandler.post { content?.render(state, savedCount) }
     }
 
     override fun setVisible(visible: Boolean) {
         desiredVisible = visible
-        mainHandler.post { view?.visibility = if (visible) View.VISIBLE else View.INVISIBLE }
+        mainHandler.post { content?.view?.visibility = if (visible) View.VISIBLE else View.INVISIBLE }
     }
 
     override fun detach() {
         desiredVisible = false
         mainHandler.post {
-            view?.let { runCatching { windowManager.removeView(it) } }
-            view = null
+            content?.let { runCatching { windowManager.removeView(it.view) } }
+            content = null
             params = null
         }
-    }
-
-    private fun buildView(): LinearLayout =
-        LinearLayout(appContext).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(8), dp(12), dp(8), dp(12))
-            background =
-                GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = dp(32).toFloat()
-                    setColor(OVERLAY_BACKGROUND)
-                }
-            addView(actionButton("📷", appContext.getString(R.string.capture_overlay_capture), onCapture))
-            addView(statusView())
-            addView(countView())
-            addView(
-                actionButton("Ⅱ", appContext.getString(R.string.capture_overlay_pause)) {
-                    val paused = state != CaptureOverlayState.CONTINUOUS_PAUSED
-                    onPauseChanged(paused)
-                },
-            )
-            addView(actionButton("■", appContext.getString(R.string.capture_overlay_stop), onStop))
-            setOnTouchListener(DragTouchListener())
-            render(this)
-        }
-
-    private fun render(container: LinearLayout) {
-        val captureButton = container.getChildAt(CAPTURE_INDEX)
-        val status = container.getChildAt(STATUS_INDEX) as TextView
-        val count = container.getChildAt(COUNT_INDEX) as TextView
-        val pause = container.getChildAt(PAUSE_INDEX) as Button
-        status.text =
-            appContext.getString(
-                when (state) {
-                    CaptureOverlayState.MANUAL_ACTIVE -> R.string.capture_overlay_manual_state
-                    CaptureOverlayState.CONTINUOUS_ACTIVE -> R.string.capture_overlay_continuous_state
-                    CaptureOverlayState.CONTINUOUS_PAUSED -> R.string.capture_overlay_paused_state
-                    CaptureOverlayState.STOPPED -> R.string.capture_overlay_stopped_state
-                },
-            )
-        val continuous =
-            state == CaptureOverlayState.CONTINUOUS_ACTIVE ||
-                state == CaptureOverlayState.CONTINUOUS_PAUSED
-        captureButton.visibility = if (state == CaptureOverlayState.MANUAL_ACTIVE) View.VISIBLE else View.GONE
-        count.visibility = if (continuous) View.VISIBLE else View.GONE
-        count.text = appContext.getString(R.string.capture_overlay_saved_count, savedCount)
-        pause.visibility = if (continuous) View.VISIBLE else View.GONE
-        pause.text = if (state == CaptureOverlayState.CONTINUOUS_PAUSED) "▶" else "Ⅱ"
-        pause.contentDescription =
-            appContext.getString(
-                if (state == CaptureOverlayState.CONTINUOUS_PAUSED) {
-                    R.string.capture_overlay_resume
-                } else {
-                    R.string.capture_overlay_pause
-                },
-            )
-    }
-
-    private fun statusView() =
-        TextView(appContext).apply {
-            setTextColor(Color.WHITE)
-            textSize = 12f
-            gravity = Gravity.CENTER
-            setPadding(dp(4), dp(4), dp(4), dp(4))
-        }
-
-    private fun countView() =
-        TextView(appContext).apply {
-            setTextColor(Color.WHITE)
-            textSize = 12f
-            gravity = Gravity.CENTER
-            setPadding(dp(8), dp(4), dp(8), dp(4))
-        }
-
-    private fun actionButton(
-        glyph: String,
-        description: String,
-        action: () -> Unit,
-    ) = Button(appContext).apply {
-        text = glyph
-        contentDescription = description
-        setTextColor(Color.WHITE)
-        textSize = 20f
-        minWidth = dp(48)
-        minHeight = dp(48)
-        setBackgroundColor(Color.TRANSPARENT)
-        setOnClickListener { action() }
-        layoutParams = LinearLayout.LayoutParams(dp(56), dp(56))
     }
 
     private fun newLayoutParams(): WindowManager.LayoutParams {
@@ -271,8 +171,8 @@ private class AndroidOverlayWindow(
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = (screenWidth - dp(80)).coerceAtLeast(0)
-            y = screenHeight / 3
+            x = (screenWidth - dp(OVERLAY_MARGIN_DP)).coerceAtLeast(0)
+            y = screenHeight / VERTICAL_START_FRACTION
         }
     }
 
@@ -339,10 +239,8 @@ private class AndroidOverlayWindow(
     private fun dp(value: Int): Int = (value * appContext.resources.displayMetrics.density).roundToInt()
 
     private companion object {
-        const val CAPTURE_INDEX = 0
-        const val STATUS_INDEX = 1
-        const val COUNT_INDEX = 2
-        const val PAUSE_INDEX = 3
-        const val OVERLAY_BACKGROUND = 0xD91A2233.toInt()
+        /** 初期位置は画面右端。オーバーレイ幅ぶんだけ内側から始め、addView 後の実測で端へ吸着させる */
+        const val OVERLAY_MARGIN_DP = 80
+        const val VERTICAL_START_FRACTION = 3
     }
 }

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 連続撮影の一時停止アイコン（docs/design/mockups/06-floating-ui.png 右端末） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M7.7,5 H8.8 A1.2,1.2 0 0 1 10,6.2 V17.8 A1.2,1.2 0 0 1 8.8,19 H7.7 A1.2,1.2 0 0 1 6.5,17.8 V6.2 A1.2,1.2 0 0 1 7.7,5 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M15.2,5 H16.3 A1.2,1.2 0 0 1 17.5,6.2 V17.8 A1.2,1.2 0 0 1 16.3,19 H15.2 A1.2,1.2 0 0 1 14,17.8 V6.2 A1.2,1.2 0 0 1 15.2,5 Z" />
+</vector>
