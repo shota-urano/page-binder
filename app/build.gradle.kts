@@ -156,6 +156,12 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
 
+kapt {
+    arguments {
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
+}
+
 androidComponents {
     onVariants(selector().withBuildType("debug")) { variant ->
         tasks.register<VerifyMergedManifestTask>("verifyDebugMergedManifest") {

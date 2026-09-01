@@ -80,6 +80,9 @@ interface ExportRecordDao {
         updatedCompletedAt: String?,
         updatedErrorCode: String?,
     ): Int
+
+    @Query("DELETE FROM export_records WHERE id = :id")
+    suspend fun deleteById(id: String): Int
 }
 
 /** Room-backed production adapter for export history persistence. */

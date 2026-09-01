@@ -151,7 +151,7 @@ interface OcrJobDao {
 @Database(
     entities = [BookProjectEntity::class, PageEntity::class, OcrResultEntity::class, ExportRecordEntity::class],
     version = 1,
-    exportSchema = false,
+    exportSchema = true,
 )
 abstract class PageBinderDatabase : RoomDatabase() {
     abstract fun bookProjectDao(): BookProjectDao
