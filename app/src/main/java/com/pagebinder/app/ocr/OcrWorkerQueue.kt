@@ -115,10 +115,4 @@ interface OcrWorkerDependencies {
 internal fun safeOcrImageFile(
     filesDir: File,
     relativePath: String,
-): File {
-    require(!File(relativePath).isAbsolute) { "OCR image path must be relative" }
-    val root = filesDir.canonicalFile
-    val image = File(root, relativePath).canonicalFile
-    require(image.path.startsWith(root.path + File.separator)) { "OCR image path escapes app storage" }
-    return image
-}
+): File = com.pagebinder.app.storage.FileImageStore(filesDir).resolve(relativePath)
