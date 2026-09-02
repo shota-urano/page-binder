@@ -31,12 +31,6 @@ data class AutoCaptureSettings(
     }
 }
 
-interface AutoCaptureSettingsRepository {
-    suspend fun read(): AutoCaptureSettings
-
-    suspend fun save(settings: AutoCaptureSettings)
-}
-
 /** Input from the capture/image layer; it contains no Android or bitmap type. */
 data class AutoCaptureFrame(
     val fingerprint: String,
