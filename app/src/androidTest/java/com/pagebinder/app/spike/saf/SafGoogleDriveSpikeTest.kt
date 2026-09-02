@@ -1,6 +1,7 @@
 package com.pagebinder.app.spike.saf
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Activity
 import android.app.Instrumentation
 import android.content.Context
@@ -8,6 +9,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
@@ -15,9 +17,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.OutputStream
@@ -27,6 +31,35 @@ import java.util.concurrent.TimeoutException
 
 @RunWith(AndroidJUnit4::class)
 class SafGoogleDriveSpikeTest {
+    /**
+     * The spike drives real system UI, so it must not inherit whatever the previous test or the
+     * previous run left on screen. Every precondition is established here and then asserted:
+     * window enumeration enabled, the Drive provider installed, no leftover DocumentsUI window and
+     * no system "isn't responding" / "has stopped" dialog covering the picker.
+     */
+    @Before
+    fun prepareDeviceState() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val automation = instrumentation.uiAutomation
+        automation.serviceInfo =
+            automation.serviceInfo.apply {
+                flags = flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            }
+        assertTrue(
+            "The SAF spike requires the Google Drive document provider ($DRIVE_PACKAGE) to be installed",
+            isPackageInstalled(instrumentation, DRIVE_PACKAGE),
+        )
+        resetPickerState(instrumentation)
+        assertTrue(
+            "A system error dialog still covers the screen; the SAF picker cannot be driven",
+            systemErrorDialogButtons(instrumentation).isEmpty(),
+        )
+        assertTrue(
+            "A DocumentsUI window from an earlier run is still open",
+            pickerRoots(instrumentation).isEmpty(),
+        )
+    }
+
     @Test
     fun writesCompletedTempFileToSelectedDriveProviderAndVerifiesErrors() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -176,109 +209,84 @@ class SafGoogleDriveSpikeTest {
     ) {
         var firstFailure: AssertionError? = null
         repeat(PICKER_LAUNCH_ATTEMPTS) { attempt ->
+            // Each attempt starts from a state this test built itself: no DocumentsUI window, no
+            // system error dialog, no stale picker result. Retrying without that reset would just
+            // re-observe whatever broke the previous attempt.
+            resetPickerState(instrumentation)
             launchPicker(context, fileName)
             try {
                 clickWhenReady(instrumentation, description = SHOW_ROOTS_DESCRIPTION)
                 return
             } catch (failure: AssertionError) {
+                val described = AssertionError("${failure.message} [${describeWindows(instrumentation)}]", failure)
                 if (attempt == PICKER_LAUNCH_ATTEMPTS - 1) {
-                    firstFailure?.let(failure::addSuppressed)
-                    throw failure
+                    firstFailure?.let(described::addSuppressed)
+                    throw described
                 }
-                firstFailure = failure
-                cancelPicker(instrumentation)
+                firstFailure = described
             }
         }
     }
 
+    /**
+     * Presses Back until the picker reports a result. A system error dialog on top of the picker
+     * steals both focus and the accessibility window list, so it is dismissed on every poll instead
+     * of being mistaken for a dismissed picker.
+     */
     private fun cancelPicker(instrumentation: Instrumentation): SafPickerSpikeActivity.PickerResult {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(UI_TIMEOUT_SECONDS)
         var backPresses = 0
-        while (backPresses < MAX_CANCEL_BACK_PRESSES) {
+        do {
+            settlePickerUi(instrumentation)
             SafPickerSpikeActivity.pollResult()?.let { result ->
                 waitForPickerDismissed(instrumentation, deadline)
                 return result
             }
             val surfaceBeforeBack = pickerSurface(instrumentation)
-            when (surfaceBeforeBack.packageName) {
-                null -> {
-                    // During an activity transition rootInActiveWindow can be temporarily null.
-                    // Do not mistake that transient state for a dismissed picker.
-                    if (System.nanoTime() >= deadline) {
-                        throw AssertionError("Timed out waiting for SAF picker window")
-                    }
-                    waitForPickerIdle(instrumentation)
-                    Thread.sleep(UI_POLL_MILLIS)
-                    continue
-                }
-                DOCUMENTS_UI_PACKAGE -> Unit
-                else -> return waitForCancelledPickerResult(instrumentation, deadline)
+            if (surfaceBeforeBack.present && backPresses < MAX_CANCEL_BACK_PRESSES) {
+                assertTrue(
+                    "SAF picker did not handle the Back action",
+                    instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK),
+                )
+                backPresses++
+                waitForPickerTransition(instrumentation, surfaceBeforeBack, deadline)
+            } else {
+                // The picker window is not (or no longer) enumerable. That is not proof of
+                // cancellation, so keep polling for the result instead of failing here.
+                Thread.sleep(UI_POLL_MILLIS)
             }
-            assertTrue(
-                "SAF picker did not handle the Back action",
-                instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK),
-            )
-            backPresses++
-            when (waitForPickerExitOrTransition(instrumentation, surfaceBeforeBack, deadline)) {
-                PickerCancellationProgress.PICKER_DISMISSED ->
-                    return waitForCancelledPickerResult(instrumentation, deadline)
-                PickerCancellationProgress.DOCUMENTS_UI_TRANSITIONED,
-                PickerCancellationProgress.NO_TRANSITION,
-                -> Unit
-            }
-        }
-        return waitForCancelledPickerResult(instrumentation, deadline)
+        } while (System.nanoTime() < deadline)
+        throw AssertionError(
+            "SAF picker did not report a cancelled result after $backPresses Back actions " +
+                "[${describeWindows(instrumentation)}]",
+        )
     }
 
-    private fun waitForPickerExitOrTransition(
+    private fun waitForPickerTransition(
         instrumentation: Instrumentation,
         surfaceBeforeBack: PickerSurface,
         deadline: Long,
-    ): PickerCancellationProgress {
+    ) {
         val transitionDeadline =
             minOf(
                 deadline,
                 System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(CANCEL_TRANSITION_TIMEOUT_MILLIS),
             )
         do {
+            settlePickerUi(instrumentation)
             val currentSurface = pickerSurface(instrumentation)
-            if (currentSurface.packageName == null) {
-                waitForPickerIdle(instrumentation)
-                Thread.sleep(UI_POLL_MILLIS)
-                continue
-            }
-            if (
-                currentSurface.packageName != DOCUMENTS_UI_PACKAGE
-            ) {
-                return PickerCancellationProgress.PICKER_DISMISSED
-            }
-            if (currentSurface != surfaceBeforeBack) return PickerCancellationProgress.DOCUMENTS_UI_TRANSITIONED
-            waitForPickerIdle(instrumentation)
+            if (currentSurface != surfaceBeforeBack) return
             Thread.sleep(UI_POLL_MILLIS)
         } while (System.nanoTime() < transitionDeadline)
-        return PickerCancellationProgress.NO_TRANSITION
-    }
-
-    private fun waitForCancelledPickerResult(
-        instrumentation: Instrumentation,
-        deadline: Long,
-    ): SafPickerSpikeActivity.PickerResult {
-        waitForPickerDismissed(instrumentation, deadline)
-        do {
-            SafPickerSpikeActivity.pollResult()?.let { return it }
-            Thread.sleep(UI_POLL_MILLIS)
-        } while (System.nanoTime() < deadline)
-        throw AssertionError("SAF picker dismissed without returning a cancelled result")
     }
 
     private fun pickerSurface(instrumentation: Instrumentation): PickerSurface {
-        val root = instrumentation.uiAutomation.rootInActiveWindow
+        val roots = pickerRoots(instrumentation)
         return PickerSurface(
-            packageName = root?.packageName?.toString(),
+            present = roots.isNotEmpty(),
             signature =
-                root
-                    ?.descendants()
-                    .orEmpty()
+                roots
+                    .flatMap { it.descendants() }
                     .take(PICKER_SURFACE_SIGNATURE_NODE_LIMIT)
                     .joinToString("|") { node ->
                         "${node.viewIdResourceName}:${node.text}:${node.contentDescription}"
@@ -291,18 +299,95 @@ class SafGoogleDriveSpikeTest {
         deadline: Long,
     ) {
         do {
-            waitForPickerIdle(instrumentation)
-            val activePackage = instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString()
-            if (activePackage != null && activePackage != DOCUMENTS_UI_PACKAGE) {
+            settlePickerUi(instrumentation)
+            if (pickerRoots(instrumentation).isEmpty()) {
                 Thread.sleep(PICKER_DISMISS_STABILITY_MILLIS)
-                waitForPickerIdle(instrumentation)
-                val stablePackage = instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString()
-                if (stablePackage != null && stablePackage != DOCUMENTS_UI_PACKAGE) return
+                settlePickerUi(instrumentation)
+                if (pickerRoots(instrumentation).isEmpty()) return
             }
             Thread.sleep(UI_POLL_MILLIS)
         } while (System.nanoTime() < deadline)
-        throw AssertionError("Timed out waiting for SAF picker dismissal")
+        throw AssertionError("Timed out waiting for SAF picker dismissal [${describeWindows(instrumentation)}]")
     }
+
+    /**
+     * Brings the device back to the state the spike assumes: DocumentsUI stopped, no system error
+     * dialog, launcher in front, and no picker result left over from an earlier launch.
+     */
+    private fun resetPickerState(instrumentation: Instrumentation) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(UI_TIMEOUT_SECONDS)
+        executeShellCommand(instrumentation, "am force-stop $DOCUMENTS_UI_PACKAGE")
+        instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+        do {
+            settlePickerUi(instrumentation)
+            if (pickerRoots(instrumentation).isEmpty() && systemErrorDialogButtons(instrumentation).isEmpty()) {
+                // A force-stopped picker delivers RESULT_CANCELED to the spike activity; give that
+                // result time to land so it is drained here instead of racing the next launch.
+                Thread.sleep(PICKER_DISMISS_STABILITY_MILLIS)
+                if (systemErrorDialogButtons(instrumentation).isEmpty()) {
+                    SafPickerSpikeActivity.resetResult()
+                    return
+                }
+            }
+            Thread.sleep(UI_POLL_MILLIS)
+        } while (System.nanoTime() < deadline)
+        SafPickerSpikeActivity.resetResult()
+    }
+
+    private fun windowRoots(instrumentation: Instrumentation): List<AccessibilityNodeInfo> {
+        val roots = instrumentation.uiAutomation.windows.mapNotNull(AccessibilityWindowInfo::getRoot)
+        return roots.ifEmpty { listOfNotNull(instrumentation.uiAutomation.rootInActiveWindow) }
+    }
+
+    private fun pickerRoots(instrumentation: Instrumentation): List<AccessibilityNodeInfo> =
+        windowRoots(instrumentation).filter { it.packageName?.toString() == DOCUMENTS_UI_PACKAGE }
+
+    /**
+     * "System UI isn't responding" / "<app> has stopped" are rendered by system_server as a modal
+     * window in the [SYSTEM_PACKAGE] namespace. While one is up the accessibility window list
+     * contains only that dialog, so the picker looks dismissed to every node query.
+     */
+    private fun systemErrorDialogButtons(instrumentation: Instrumentation): List<AccessibilityNodeInfo> =
+        windowRoots(instrumentation)
+            .filter { it.packageName?.toString() == SYSTEM_PACKAGE }
+            .flatMap { it.descendants() }
+            .filter { it.viewIdResourceName in SYSTEM_ERROR_DIALOG_BUTTON_IDS && it.isVisibleToUser }
+
+    private fun dismissSystemErrorDialogs(instrumentation: Instrumentation): Boolean {
+        val buttons = systemErrorDialogButtons(instrumentation)
+        if (buttons.isEmpty()) return false
+        // "Wait" keeps the offending process (possibly the instrumented app itself) alive.
+        SYSTEM_ERROR_DIALOG_BUTTON_IDS.forEach { buttonId ->
+            buttons.firstOrNull { it.viewIdResourceName == buttonId && it.isEnabled }?.let { button ->
+                if (click(button)) return true
+            }
+        }
+        return false
+    }
+
+    private fun executeShellCommand(
+        instrumentation: Instrumentation,
+        command: String,
+    ): String =
+        instrumentation.uiAutomation.executeShellCommand(command).use { descriptor ->
+            FileInputStream(descriptor.fileDescriptor).use { it.readBytes().decodeToString() }
+        }
+
+    private fun describeWindows(instrumentation: Instrumentation): String =
+        windowRoots(instrumentation).joinToString(",") { it.packageName?.toString() ?: "?" }
+
+    /**
+     * Asked through the shell because the app declares no `<queries>` entry for Drive: package
+     * visibility filtering would hide the provider from [Context.getPackageManager] even when it
+     * is installed, and the app has no product reason to see it outside SAF.
+     */
+    private fun isPackageInstalled(
+        instrumentation: Instrumentation,
+        packageName: String,
+    ): Boolean =
+        executeShellCommand(instrumentation, "pm list packages $packageName")
+            .lineSequence()
+            .any { it.trim() == "package:$packageName" }
 
     private fun waitForNode(
         instrumentation: Instrumentation,
@@ -313,18 +398,18 @@ class SafGoogleDriveSpikeTest {
         deadlineNanos: Long = System.nanoTime() + TimeUnit.SECONDS.toNanos(UI_TIMEOUT_SECONDS),
     ): AccessibilityNodeInfo {
         do {
-            waitForPickerIdle(instrumentation)
-            val root = instrumentation.uiAutomation.rootInActiveWindow
+            settlePickerUi(instrumentation)
+            val roots = pickerRoots(instrumentation)
             val matches =
                 when {
                     resourceId != null ->
-                        root
-                            ?.descendants()
-                            .orEmpty()
+                        roots
+                            .flatMap { it.descendants() }
                             .filter { it.viewIdResourceName == resourceId }
-                    text != null -> root?.findAccessibilityNodeInfosByText(text).orEmpty()
+                    text != null -> roots.flatMap { it.findAccessibilityNodeInfosByText(text).orEmpty() }
                     description != null ->
-                        root?.descendants().orEmpty()
+                        roots
+                            .flatMap { it.descendants() }
                             .filter { it.contentDescription?.toString() == description }
                     else -> emptyList()
                 }
@@ -340,7 +425,8 @@ class SafGoogleDriveSpikeTest {
         } while (System.nanoTime() < deadlineNanos)
         throw AssertionError(
             "Timed out waiting for SAF picker node " +
-                "(text=$text, textPrefix=$textPrefix, description=$description, resourceId=$resourceId)",
+                "(text=$text, textPrefix=$textPrefix, description=$description, resourceId=$resourceId) " +
+                "[${describeWindows(instrumentation)}]",
         )
     }
 
@@ -364,7 +450,7 @@ class SafGoogleDriveSpikeTest {
                     ),
                 )
             ) {
-                if (waitForIdleAfterClick) waitForPickerIdle(instrumentation)
+                if (waitForIdleAfterClick) settlePickerUi(instrumentation)
                 return
             }
             Thread.sleep(UI_POLL_MILLIS)
@@ -372,7 +458,15 @@ class SafGoogleDriveSpikeTest {
         throw AssertionError("SAF picker node was not clickable")
     }
 
-    private fun waitForPickerIdle(instrumentation: Instrumentation) {
+    /**
+     * One poll step: clear anything the system put on top of the picker, then wait for the UI to
+     * go idle. Every wait loop goes through here so a mid-run ANR dialog can never be observed as
+     * "the picker went away".
+     */
+    private fun settlePickerUi(instrumentation: Instrumentation) {
+        if (dismissSystemErrorDialogs(instrumentation)) {
+            Thread.sleep(SYSTEM_DIALOG_SETTLE_MILLIS)
+        }
         try {
             instrumentation.uiAutomation.waitForIdle(UI_IDLE_MILLIS, UI_IDLE_TIMEOUT_MILLIS)
         } catch (_: TimeoutException) {
@@ -499,20 +593,23 @@ class SafGoogleDriveSpikeTest {
     private fun elapsedMillis(startedAt: Long): Long = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
 
     private data class PickerSurface(
-        val packageName: String?,
+        val present: Boolean,
         val signature: String,
     )
-
-    private enum class PickerCancellationProgress {
-        PICKER_DISMISSED,
-        DOCUMENTS_UI_TRANSITIONED,
-        NO_TRANSITION,
-    }
 
     companion object {
         private const val DRIVE_PACKAGE = "com.google.android.apps.docs"
         private const val DRIVE_AUTHORITY = "com.google.android.apps.docs.storage"
         private const val DOCUMENTS_UI_PACKAGE = "com.google.android.documentsui"
+        private const val SYSTEM_PACKAGE = "android"
+
+        /** system_server's AppErrorDialog buttons, most preferred first. */
+        private val SYSTEM_ERROR_DIALOG_BUTTON_IDS =
+            listOf(
+                "android:id/aerr_wait",
+                "android:id/aerr_close",
+                "android:id/aerr_restart",
+            )
         private const val DRIVE_ROOT_LABEL = "Drive"
         private const val DRIVE_HEADER_PREFIX = "Files from Drive"
         private const val MY_DRIVE_LABEL = "My Drive"
@@ -521,8 +618,9 @@ class SafGoogleDriveSpikeTest {
         private const val TEMP_EXPORT_NAME = "gph-1-completed-export.tmp"
         private const val METRICS_FILE = "gph-1-saf-drive-metrics.txt"
         private const val PICKER_TIMEOUT_SECONDS = 30L
-        private const val PICKER_LAUNCH_ATTEMPTS = 2
-        private const val MAX_CANCEL_BACK_PRESSES = 3
+        private const val PICKER_LAUNCH_ATTEMPTS = 3
+        private const val MAX_CANCEL_BACK_PRESSES = 5
+        private const val SYSTEM_DIALOG_SETTLE_MILLIS = 500L
         private const val UI_TIMEOUT_SECONDS = 60L
         private const val UI_IDLE_MILLIS = 500L
         private const val UI_IDLE_TIMEOUT_MILLIS = 3_000L
