@@ -20,7 +20,7 @@ data class StoredCaptureImage(
 )
 
 /** Keeps bitmap encoding and app-private atomic file replacement outside domain code. */
-fun interface CaptureImageStore {
+fun interface ImageStore {
     fun saveAtomically(
         projectId: UUID,
         pageId: UUID,
@@ -52,12 +52,12 @@ enum class CapturePageFailure {
  *
  * The mutex deliberately uses tryLock: a second floating-button tap while a capture is in flight
  * cannot enqueue a second snapshot of the same rendered page.  Files are atomically published by
- * [CaptureImageStore]; any later persistence failure rolls that new file back.
+ * [ImageStore]; any later persistence failure rolls that new file back.
  */
 class CaptureOnePage(
     private val captureGateway: CaptureGateway,
     private val overlayGateway: CaptureOverlayGateway,
-    private val imageStore: CaptureImageStore,
+    private val imageStore: ImageStore,
     private val pageRepository: PageRepository,
     private val ocrQueue: OcrQueue,
     private val now: () -> Instant = Instant::now,
@@ -76,7 +76,7 @@ class CaptureOnePage(
             waitForStableFrame()
             val frame = captureGateway.latestFrame() ?: return CapturePageResult.Failed(CapturePageFailure.NO_FRAME)
 
-            // 5–6: frame orientation is normalized by CaptureImageStore before an atomic publish.
+            // 5–6: frame orientation is normalized by ImageStore before an atomic publish.
             // Allocate the id before any side effect, and retain the complete Page before insert.
             // This leaves no cancellation window in which a committed DB row lacks a rollback target.
             val pageId = UUID.randomUUID()
