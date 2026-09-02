@@ -16,7 +16,6 @@ import com.pagebinder.app.data.RoomOcrResultRepository
 import com.pagebinder.app.data.RoomPageRepository
 import com.pagebinder.app.data.createAutoCaptureSettingsRepository
 import com.pagebinder.app.data.createConsentRepository
-import com.pagebinder.app.domain.AutoCaptureSettingsRepository
 import com.pagebinder.app.domain.BookProjectRepository
 import com.pagebinder.app.domain.CaptureGateway
 import com.pagebinder.app.domain.ConsentRepository
@@ -28,6 +27,7 @@ import com.pagebinder.app.domain.OcrJobRepository
 import com.pagebinder.app.domain.OcrResultRepository
 import com.pagebinder.app.domain.PageRepository
 import com.pagebinder.app.domain.PdfGateway
+import com.pagebinder.app.domain.SettingsRepository
 import com.pagebinder.app.export.PdfBoxPdfGateway
 import com.pagebinder.app.ocr.MlKitOcrGateway
 import com.pagebinder.app.storage.FileImageStore
@@ -138,9 +138,9 @@ object AppDataModule {
 
     @Provides
     @Singleton
-    fun provideAutoCaptureSettingsRepository(
+    fun provideSettingsRepository(
         @ApplicationContext context: Context,
-    ): AutoCaptureSettingsRepository = createAutoCaptureSettingsRepository(context)
+    ): SettingsRepository = createAutoCaptureSettingsRepository(context)
 
     @Provides
     @Singleton

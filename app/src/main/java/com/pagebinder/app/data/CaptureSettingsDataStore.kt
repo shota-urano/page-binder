@@ -9,15 +9,15 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.pagebinder.app.domain.AutoCaptureSensitivity
 import com.pagebinder.app.domain.AutoCaptureSettings
-import com.pagebinder.app.domain.AutoCaptureSettingsRepository
 import com.pagebinder.app.domain.CaptureFeedbackSettings
 import com.pagebinder.app.domain.CaptureFeedbackSettingsRepository
+import com.pagebinder.app.domain.SettingsRepository
 import kotlinx.coroutines.flow.first
 import java.time.Duration
 
 private val Context.captureSettingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "capture_settings")
 
-fun createAutoCaptureSettingsRepository(context: Context): AutoCaptureSettingsRepository =
+fun createAutoCaptureSettingsRepository(context: Context): SettingsRepository =
     DataStoreAutoCaptureSettingsRepository(context.applicationContext.captureSettingsDataStore)
 
 fun createCaptureFeedbackSettingsRepository(context: Context): CaptureFeedbackDataStoreRepository =
@@ -25,7 +25,7 @@ fun createCaptureFeedbackSettingsRepository(context: Context): CaptureFeedbackDa
 
 class DataStoreAutoCaptureSettingsRepository(
     private val dataStore: DataStore<Preferences>,
-) : AutoCaptureSettingsRepository {
+) : SettingsRepository {
     override suspend fun read(): AutoCaptureSettings {
         val preferences = dataStore.data.first()
         val interval = preferences[MINIMUM_INTERVAL_SECONDS] ?: DEFAULT_INTERVAL_SECONDS
