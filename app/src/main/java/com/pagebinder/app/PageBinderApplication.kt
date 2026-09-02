@@ -1,16 +1,11 @@
 package com.pagebinder.app
 
 import android.app.Application
-import androidx.room.Room
 import com.pagebinder.app.capture.AndroidCaptureFeedbackGateway
 import com.pagebinder.app.capture.AndroidCaptureGateway
 import com.pagebinder.app.capture.CapturePageController
 import com.pagebinder.app.capture.CaptureStatusNotifier
 import com.pagebinder.app.capture.CaptureStatusPresenter
-import com.pagebinder.app.data.PageBinderDatabase
-import com.pagebinder.app.data.RoomBookProjectRepository
-import com.pagebinder.app.data.RoomOcrJobRepository
-import com.pagebinder.app.data.RoomPageRepository
 import com.pagebinder.app.data.createAutoCaptureSettingsRepository
 import com.pagebinder.app.data.createCaptureFeedbackSettingsRepository
 import com.pagebinder.app.domain.BookProjectRepository
@@ -21,6 +16,7 @@ import com.pagebinder.app.domain.CaptureSessionCoordinator
 import com.pagebinder.app.domain.CaptureSessionLifecycle
 import com.pagebinder.app.domain.CaptureStopReason
 import com.pagebinder.app.domain.OcrImageSource
+import com.pagebinder.app.domain.OcrJobRepository
 import com.pagebinder.app.domain.OcrJobRunner
 import com.pagebinder.app.domain.OcrQueue
 import com.pagebinder.app.domain.OcrQueueScheduler
@@ -31,27 +27,26 @@ import com.pagebinder.app.ocr.MlKitOcrGateway
 import com.pagebinder.app.ocr.OcrWorkerDependencies
 import com.pagebinder.app.ocr.WorkManagerOcrQueueScheduler
 import com.pagebinder.app.storage.FileImageStore
-import com.pagebinder.app.storage.FileProjectFileStore
 import com.pagebinder.app.ui.overlay.CaptureOverlayController
+import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
+@HiltAndroidApp
 open class PageBinderApplication : Application(), OcrWorkerDependencies {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val database by lazy {
-        Room
-            .databaseBuilder(this, PageBinderDatabase::class.java, DATABASE_NAME)
-            .addMigrations(PageBinderDatabase.MIGRATION_1_2)
-            .build()
-    }
-    private val repository by lazy { RoomOcrJobRepository(database.ocrJobDao()) }
-    val bookProjectRepository: BookProjectRepository by lazy {
-        RoomBookProjectRepository(database.bookProjectDao(), FileProjectFileStore(filesDir))
-    }
-    val pageRepository: PageRepository by lazy { RoomPageRepository(database.pageDao()) }
-    private val imageStore by lazy { FileImageStore(filesDir) }
+
+    @Inject lateinit var repository: OcrJobRepository
+
+    @Inject lateinit var bookProjectRepository: BookProjectRepository
+
+    @Inject lateinit var pageRepository: PageRepository
+
+    @Inject lateinit var imageStore: FileImageStore
+
     val pageThumbnailLoader by lazy { FilePageThumbnailLoader(imageStore, pageRepository) }
     val ocrQueueScheduler by lazy { createOcrQueueScheduler() }
     private val ocrQueueSessionLifecycle: CaptureSessionLifecycle by lazy {
