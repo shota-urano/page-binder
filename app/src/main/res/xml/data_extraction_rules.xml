@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- FileImageStore: files/projects/{projectId}/images/{pageId}.webp. -->
+        <exclude domain="file" path="projects" />
+        <!-- PageBinderApplication.DATABASE_NAME. This also excludes OCR fullText and blocksJson. -->
+        <exclude domain="database" path="pagebinder.db" />
+    </cloud-backup>
+    <device-transfer>
+        <!-- FileImageStore: files/projects/{projectId}/images/{pageId}.webp. -->
+        <exclude domain="file" path="projects" />
+        <!-- PageBinderApplication.DATABASE_NAME. This also excludes OCR fullText and blocksJson. -->
+        <exclude domain="database" path="pagebinder.db" />
+    </device-transfer>
+</data-extraction-rules>
