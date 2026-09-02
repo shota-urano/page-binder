@@ -35,6 +35,7 @@ class PageBinderDatabaseMigrationTest {
             assertEquals(VERSION_1_SCHEMA.keys, database.userTableNames())
             VERSION_1_SCHEMA.forEach { (tableName, expectedTable) ->
                 assertEquals(expectedTable.columns, database.columnDefinitions(tableName))
+                assertEquals(expectedTable.primaryKeys, database.primaryKeyDefinitions(tableName))
                 assertEquals(expectedTable.indices, database.indexDefinitions(tableName))
                 assertEquals(expectedTable.foreignKeys, database.foreignKeyDefinitions(tableName))
             }
@@ -152,6 +153,23 @@ class PageBinderDatabaseMigrationTest {
             }
         }
 
+    private fun SupportSQLiteDatabase.primaryKeyDefinitions(tableName: String): List<String> =
+        query("PRAGMA table_info(`$tableName`)").use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    val primaryKeyPosition = cursor.getInt(cursor.getColumnIndexOrThrow("pk"))
+                    if (primaryKeyPosition > 0) {
+                        add(
+                            primaryKeyPosition to
+                                cursor.getString(cursor.getColumnIndexOrThrow("name")),
+                        )
+                    }
+                }
+            }
+                .sortedBy { (position, _) -> position }
+                .map { (_, name) -> name }
+        }
+
     private fun SupportSQLiteDatabase.indexDefinitions(tableName: String): List<IndexDefinition> =
         query("PRAGMA index_list(`$tableName`)").use { cursor ->
             buildList {
@@ -219,6 +237,7 @@ class PageBinderDatabaseMigrationTest {
                                 ColumnDefinition("updated_at", "TEXT", true),
                                 ColumnDefinition("deleted_at", "TEXT", false),
                             ),
+                        primaryKeys = listOf("id"),
                     ),
                 "pages" to
                     TableDefinition(
@@ -241,6 +260,7 @@ class PageBinderDatabaseMigrationTest {
                                 ColumnDefinition("quality_state", "TEXT", true),
                                 ColumnDefinition("ocr_state", "TEXT", true),
                             ),
+                        primaryKeys = listOf("id"),
                         indices =
                             listOf(
                                 IndexDefinition(
@@ -262,6 +282,7 @@ class PageBinderDatabaseMigrationTest {
                                 ColumnDefinition("source_image_hash", "TEXT", true),
                                 ColumnDefinition("processed_at", "TEXT", true),
                             ),
+                        primaryKeys = listOf("page_id"),
                     ),
                 "export_records" to
                     TableDefinition(
@@ -276,12 +297,14 @@ class PageBinderDatabaseMigrationTest {
                                 ColumnDefinition("completed_at", "TEXT", false),
                                 ColumnDefinition("error_code", "TEXT", false),
                             ),
+                        primaryKeys = listOf("id"),
                     ),
             )
     }
 
     private data class TableDefinition(
         val columns: List<ColumnDefinition>,
+        val primaryKeys: List<String> = emptyList(),
         val indices: List<IndexDefinition> = emptyList(),
         val foreignKeys: List<ForeignKeyDefinition> = emptyList(),
     )
