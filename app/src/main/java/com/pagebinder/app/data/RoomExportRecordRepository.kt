@@ -17,17 +17,17 @@ import java.util.UUID
 @Entity(tableName = "export_records")
 data class ExportRecordEntity(
     @PrimaryKey
-    val id: String,
+    val id: UUID,
     @ColumnInfo(name = "project_id")
-    val projectId: String,
-    val type: String,
+    val projectId: UUID,
+    val type: ExportType,
     @ColumnInfo(name = "target_uri")
     val targetUri: String?,
-    val state: String,
+    val state: ExportState,
     @ColumnInfo(name = "created_at")
-    val createdAt: String,
+    val createdAt: Instant,
     @ColumnInfo(name = "completed_at")
-    val completedAt: String?,
+    val completedAt: Instant?,
     @ColumnInfo(name = "error_code")
     val errorCode: String?,
 )
@@ -80,6 +80,9 @@ interface ExportRecordDao {
         updatedCompletedAt: String?,
         updatedErrorCode: String?,
     ): Int
+
+    @Query("DELETE FROM export_records WHERE id = :id")
+    suspend fun deleteById(id: String): Int
 }
 
 /** Room-backed production adapter for export history persistence. */
@@ -102,45 +105,21 @@ class RoomExportRecordRepository(
         val expectedEntity = expected.toEntity()
         val updatedEntity = updated.toEntity()
         return dao.compareAndSet(
-            expectedId = expectedEntity.id,
-            expectedProjectId = expectedEntity.projectId,
-            expectedType = expectedEntity.type,
+            expectedId = expectedEntity.id.toString(),
+            expectedProjectId = expectedEntity.projectId.toString(),
+            expectedType = expectedEntity.type.serializedName,
             expectedTargetUri = expectedEntity.targetUri,
-            expectedState = expectedEntity.state,
-            expectedCreatedAt = expectedEntity.createdAt,
-            expectedCompletedAt = expectedEntity.completedAt,
+            expectedState = expectedEntity.state.serializedName,
+            expectedCreatedAt = expectedEntity.createdAt.toString(),
+            expectedCompletedAt = expectedEntity.completedAt?.toString(),
             expectedErrorCode = expectedEntity.errorCode,
-            updatedProjectId = updatedEntity.projectId,
-            updatedType = updatedEntity.type,
+            updatedProjectId = updatedEntity.projectId.toString(),
+            updatedType = updatedEntity.type.serializedName,
             updatedTargetUri = updatedEntity.targetUri,
-            updatedState = updatedEntity.state,
-            updatedCreatedAt = updatedEntity.createdAt,
-            updatedCompletedAt = updatedEntity.completedAt,
+            updatedState = updatedEntity.state.serializedName,
+            updatedCreatedAt = updatedEntity.createdAt.toString(),
+            updatedCompletedAt = updatedEntity.completedAt?.toString(),
             updatedErrorCode = updatedEntity.errorCode,
         ) == 1
     }
 }
-
-private fun ExportRecord.toEntity() =
-    ExportRecordEntity(
-        id = id.toString(),
-        projectId = projectId.toString(),
-        type = type.serializedName,
-        targetUri = targetUri,
-        state = state.serializedName,
-        createdAt = createdAt.toString(),
-        completedAt = completedAt?.toString(),
-        errorCode = errorCode,
-    )
-
-private fun ExportRecordEntity.toDomain() =
-    ExportRecord(
-        id = UUID.fromString(id),
-        projectId = UUID.fromString(projectId),
-        type = ExportType.entries.single { it.serializedName == type },
-        targetUri = targetUri,
-        state = ExportState.entries.single { it.serializedName == state },
-        createdAt = Instant.parse(createdAt),
-        completedAt = completedAt?.let(Instant::parse),
-        errorCode = errorCode,
-    )

@@ -1,9 +1,5 @@
 package com.pagebinder.app.capture
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -15,7 +11,6 @@ import android.os.IBinder
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import com.pagebinder.app.PageBinderApplication
-import com.pagebinder.app.R
 import com.pagebinder.app.domain.AutoCaptureSensitivity
 import com.pagebinder.app.domain.AutoCaptureSettings
 import com.pagebinder.app.domain.CaptureGatewayStartResult
@@ -52,6 +47,7 @@ class CaptureOverlayPermissionGuard {
 class CaptureForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var coordinator: CaptureSessionCoordinator
+    private lateinit var statusNotifier: CaptureStatusNotifier
     private var stateObserver: Job? = null
     private var sessionStarted = false
     private var receiverRegistered = false
@@ -71,7 +67,8 @@ class CaptureForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         coordinator = (application as PageBinderApplication).captureSessionCoordinator
-        createNotificationChannel()
+        statusNotifier = (application as PageBinderApplication).captureStatusNotifier
+        statusNotifier.createChannel()
         ContextCompat.registerReceiver(
             this,
             screenOffReceiver,
@@ -87,7 +84,7 @@ class CaptureForegroundService : Service() {
                         val reason = coordinator.lastStopReason.value
                         stopServiceForeground()
                         if (reason != null && reason != CaptureStopReason.EXPLICIT) {
-                            showUnexpectedStopNotification()
+                            statusNotifier.postUnexpectedStop()
                         }
                     }
                 }
@@ -181,68 +178,16 @@ class CaptureForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun startAsMediaProjectionForegroundService(mode: CaptureMode) {
-        val stopPendingIntent =
-            PendingIntent.getService(
-                this,
-                STOP_PENDING_INTENT_REQUEST_CODE,
-                Intent(this, CaptureForegroundService::class.java).setAction(ACTION_STOP_CAPTURE),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            )
-        val notification =
-            Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setContentTitle(getString(R.string.capture_notification_title))
-                .setContentText(
-                    getString(
-                        if (mode == CaptureMode.CONTINUOUS) {
-                            R.string.capture_notification_continuous
-                        } else {
-                            R.string.capture_notification_manual
-                        },
-                    ),
-                )
-                .setOngoing(true)
-                .setCategory(Notification.CATEGORY_SERVICE)
-                .addAction(
-                    Notification.Action.Builder(
-                        null,
-                        getString(R.string.capture_notification_stop),
-                        stopPendingIntent,
-                    ).build(),
-                ).build()
+        val notification = statusNotifier.build(CaptureStatusNotifier.initialState(mode), savedCount = 0)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
-                NOTIFICATION_ID,
+                CaptureStatusNotifier.NOTIFICATION_ID,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
             )
         } else {
-            startForeground(NOTIFICATION_ID, notification)
+            startForeground(CaptureStatusNotifier.NOTIFICATION_ID, notification)
         }
-    }
-
-    private fun createNotificationChannel() {
-        val channel =
-            NotificationChannel(
-                NOTIFICATION_CHANNEL_ID,
-                getString(R.string.capture_notification_channel),
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                description = getString(R.string.capture_notification_channel_description)
-                setShowBadge(false)
-            }
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-    }
-
-    private fun showUnexpectedStopNotification() {
-        val notification =
-            Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_menu_close_clear_cancel)
-                .setContentTitle(getString(R.string.capture_notification_stopped_title))
-                .setContentText(getString(R.string.capture_notification_stopped_message))
-                .setAutoCancel(true)
-                .build()
-        getSystemService(NotificationManager::class.java).notify(STOPPED_NOTIFICATION_ID, notification)
     }
 
     private fun stopServiceForeground() {
@@ -297,10 +242,6 @@ class CaptureForegroundService : Service() {
         private const val EXTRA_MAXIMUM_PAGES = "maximum_pages"
         private const val EXTRA_MAXIMUM_DURATION_SECONDS = "maximum_duration_seconds"
         private const val EXTRA_SENSITIVITY = "sensitivity"
-        private const val NOTIFICATION_CHANNEL_ID = "capture_session"
-        private const val NOTIFICATION_ID = 2501
-        private const val STOPPED_NOTIFICATION_ID = 2503
-        private const val STOP_PENDING_INTENT_REQUEST_CODE = 2502
 
         fun start(
             context: Context,

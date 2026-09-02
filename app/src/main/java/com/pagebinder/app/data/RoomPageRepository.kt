@@ -8,12 +8,10 @@ import androidx.room.Transaction
 import com.pagebinder.app.domain.Page
 import com.pagebinder.app.domain.PageCrop
 import com.pagebinder.app.domain.PageCropScope
-import com.pagebinder.app.domain.PageOcrState
 import com.pagebinder.app.domain.PageQualityState
 import com.pagebinder.app.domain.PageRepository
 import com.pagebinder.app.domain.PageRepositoryException
 import com.pagebinder.app.domain.VALID_PAGE_ROTATIONS
-import java.time.Instant
 import java.util.UUID
 
 @Dao
@@ -47,7 +45,7 @@ abstract class PageDao {
         pageId: String,
     ) {
         val page = findById(pageId) ?: return
-        check(page.projectId == projectId) { "Captured page does not belong to project" }
+        check(page.projectId.toString() == projectId) { "Captured page does not belong to project" }
         check(deleteByIds(listOf(pageId)) == 1) { "Capture rollback did not delete the inserted page" }
     }
 
@@ -114,7 +112,7 @@ abstract class PageDao {
         projectId: String,
         orderedPageIds: List<String>,
     ) {
-        val currentIds = findByProject(projectId).map(PageEntity::id)
+        val currentIds = findByProject(projectId).map { it.id.toString() }
         if (orderedPageIds.size != currentIds.size || orderedPageIds.toSet() != currentIds.toSet()) {
             throw PageRepositoryException.InvalidProjectOrder()
         }
@@ -144,22 +142,22 @@ abstract class PageDao {
     ) {
         if (pageIds.isEmpty() && resolvedDuplicatePageIds.isEmpty()) return
         val currentPages = findByProject(projectId)
-        val currentIds = currentPages.map(PageEntity::id)
+        val currentIds = currentPages.map { it.id.toString() }
         if (!currentIds.containsAll(pageIds) || !currentIds.containsAll(resolvedDuplicatePageIds)) {
             throw PageRepositoryException.PagesNotInProject()
         }
-        val deletedPages = currentPages.filter { it.id in pageIds }
+        val deletedPages = currentPages.filter { it.id.toString() in pageIds }
         // 既に重複警告が付いているページだけを戻す対象として控える（付いていなければ書き換えない）
         val resolvedPages =
             currentPages.filter {
-                it.id in resolvedDuplicatePageIds && it.qualityState == DUPLICATE_QUALITY_STATE
+                it.id.toString() in resolvedDuplicatePageIds && it.qualityState == PageQualityState.DUPLICATE
             }
         if (pageIds.isNotEmpty()) {
             check(deleteByIds(pageIds.toList()) == pageIds.size) { "Page delete did not affect every selected row" }
             rewriteSequences(currentIds.filterNot(pageIds::contains))
         }
         resolvedPages.forEach { page ->
-            check(updateQualityState(page.id, NORMAL_QUALITY_STATE) == 1) {
+            check(updateQualityState(page.id.toString(), NORMAL_QUALITY_STATE) == 1) {
                 "Page quality state update did not affect one row"
             }
         }
@@ -180,7 +178,7 @@ abstract class PageDao {
         val page = findById(pageId) ?: throw PageRepositoryException.PageNotFound(UUID.fromString(pageId))
         if (page.rotation == rotation) return
         check(updateRotationAndMarkStale(pageId, rotation) == 1) { "Page rotation update did not affect one row" }
-        lastUndoAction = PageUndoAction.Rotation(pageId, page.rotation, page.ocrState)
+        lastUndoAction = PageUndoAction.Rotation(pageId, page.rotation, page.ocrState.serializedName)
     }
 
     @Transaction
@@ -215,7 +213,7 @@ abstract class PageDao {
         projectWideCrop: Boolean,
     ): Int {
         val page = findById(pageId) ?: throw PageRepositoryException.PageNotFound(UUID.fromString(pageId))
-        val cropTargets = if (projectWideCrop) findByProject(page.projectId) else listOf(page)
+        val cropTargets = if (projectWideCrop) findByProject(page.projectId.toString()) else listOf(page)
         val rotationChanged = page.rotation != rotation
         val cropChanges = cropTargets.filterNot { it.hasCrop(crop) }
         if (rotationChanged) {
@@ -224,7 +222,7 @@ abstract class PageDao {
         cropChanges.forEach { target ->
             check(
                 updateCropAndMarkStale(
-                    id = target.id,
+                    id = target.id.toString(),
                     left = crop.left,
                     top = crop.top,
                     right = crop.right,
@@ -237,7 +235,7 @@ abstract class PageDao {
                 PageUndoAction.Edit(
                     rotation =
                         PageUndoAction
-                            .Rotation(pageId, page.rotation, page.ocrState)
+                            .Rotation(pageId, page.rotation, page.ocrState.serializedName)
                             .takeIf { rotationChanged },
                     crops = cropChanges.map(PageEntity::toCropUndoAction),
                 )
@@ -253,7 +251,7 @@ abstract class PageDao {
             is PageUndoAction.Delete -> {
                 // 削除と一緒に消した重複警告も同じ1操作として戻す（docs/specs/08-page-editing.md §3.4）
                 action.resolvedQualityStates.forEach { restore(it) }
-                val remainingIds = findByProject(action.projectId).map(PageEntity::id)
+                val remainingIds = findByProject(action.projectId).map { it.id.toString() }
                 stageSequences(remainingIds)
                 insertAll(action.deletedPages)
                 assignFinalSequences(action.orderedPageIds)
@@ -443,57 +441,20 @@ private sealed interface PageUndoAction {
 }
 
 /** 判定値は Domain の [PageQualityState] が正本。data 層でも文字列を直書きしない */
-private val DUPLICATE_QUALITY_STATE = PageQualityState.DUPLICATE.serializedName
 private val NORMAL_QUALITY_STATE = PageQualityState.NORMAL.serializedName
 
-private fun PageEntity.toQualityUndoAction() = PageUndoAction.Quality(pageId = id, qualityState = qualityState)
+private fun PageEntity.toQualityUndoAction() =
+    PageUndoAction.Quality(pageId = id.toString(), qualityState = qualityState.serializedName)
 
 private fun PageEntity.hasCrop(crop: PageCrop): Boolean =
     cropLeft == crop.left && cropTop == crop.top && cropRight == crop.right && cropBottom == crop.bottom
 
 private fun PageEntity.toCropUndoAction() =
     PageUndoAction.Crop(
-        pageId = id,
+        pageId = id.toString(),
         left = cropLeft,
         top = cropTop,
         right = cropRight,
         bottom = cropBottom,
-        ocrState = ocrState,
-    )
-
-private fun Page.toEntity() =
-    PageEntity(
-        id = id.toString(),
-        projectId = projectId.toString(),
-        sequence = sequence,
-        originalImagePath = originalImagePath,
-        width = width,
-        height = height,
-        rotation = rotation,
-        cropLeft = crop.left,
-        cropTop = crop.top,
-        cropRight = crop.right,
-        cropBottom = crop.bottom,
-        capturedAt = capturedAt.toString(),
-        contentHash = contentHash,
-        perceptualHash = perceptualHash,
-        qualityState = qualityState.serializedName,
         ocrState = ocrState.serializedName,
-    )
-
-private fun PageEntity.toDomain() =
-    Page(
-        id = UUID.fromString(id),
-        projectId = UUID.fromString(projectId),
-        sequence = sequence,
-        originalImagePath = originalImagePath,
-        width = width,
-        height = height,
-        rotation = rotation,
-        crop = PageCrop(cropLeft, cropTop, cropRight, cropBottom),
-        capturedAt = Instant.parse(capturedAt),
-        contentHash = contentHash,
-        perceptualHash = perceptualHash,
-        qualityState = PageQualityState.entries.single { it.serializedName == qualityState },
-        ocrState = PageOcrState.entries.single { it.serializedName == ocrState },
     )

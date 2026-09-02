@@ -1,12 +1,12 @@
 package com.pagebinder.app.ocr
 
-import android.app.Instrumentation
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.work.Configuration
@@ -15,8 +15,10 @@ import androidx.work.WorkManager
 import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.pagebinder.app.TestPageBinderApplication
+import com.pagebinder.app.data.BookProjectEntity
 import com.pagebinder.app.data.OcrJobDao
 import com.pagebinder.app.data.OcrResultEntity
+import com.pagebinder.app.data.PageBinderTypeConverters
 import com.pagebinder.app.data.PageEntity
 import com.pagebinder.app.data.RoomOcrJobRepository
 import com.pagebinder.app.domain.OcrExecutionPolicy
@@ -24,6 +26,8 @@ import com.pagebinder.app.domain.OcrGateway
 import com.pagebinder.app.domain.OcrImageSource
 import com.pagebinder.app.domain.OcrJobRunner
 import com.pagebinder.app.domain.OcrOutput
+import com.pagebinder.app.domain.PageOcrState
+import com.pagebinder.app.domain.PageQualityState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -63,9 +67,25 @@ class OcrWorkerRestartTest {
     }
 
     @Test
-    fun applicationStartupReschedulesAndRecoversJobsAfterDatabaseReopen() =
+    fun applicationOnCreateWakesTheOcrQueue() {
+        assertEquals(1, TestPageBinderApplication.processStartWakeCalls())
+    }
+
+    @Test
+    fun queueWakeReschedulesAndRecoversJobsAfterDatabaseReopen() =
         runBlocking {
             val firstDatabase = openDatabase()
+            firstDatabase.setupDao().insertProject(
+                BookProjectEntity(
+                    id = UUID.fromString(PROJECT_ID),
+                    title = "Test project",
+                    author = null,
+                    note = null,
+                    createdAt = Instant.parse("2026-08-27T00:00:00Z"),
+                    updatedAt = Instant.parse("2026-08-27T00:00:00Z"),
+                    deletedAt = null,
+                ),
+            )
             firstDatabase.setupDao().insertPages(
                 listOf(
                     pageEntity("10000000-0000-0000-0000-000000000001", "running", 1),
@@ -92,11 +112,7 @@ class OcrWorkerRestartTest {
                     now = { Instant.parse("2026-08-27T01:00:00Z") },
                 )
 
-            val restartedApplication =
-                Instrumentation
-                    .newApplication(TestPageBinderApplication::class.java, targetContext)
-                    .let { it as TestPageBinderApplication }
-            instrumentation.callApplicationOnCreate(restartedApplication)
+            WorkManagerOcrQueueScheduler(targetContext).wake()
 
             val workManager = WorkManager.getInstance(targetContext)
             val startupWork = workManager.getWorkInfosForUniqueWork(OcrWorker.UNIQUE_WORK_NAME).get().single()
@@ -124,8 +140,8 @@ class OcrWorkerRestartTest {
         state: String,
         sequence: Int,
     ) = PageEntity(
-        id = id,
-        projectId = "20000000-0000-0000-0000-000000000001",
+        id = UUID.fromString(id),
+        projectId = UUID.fromString(PROJECT_ID),
         sequence = sequence,
         originalImagePath = "projects/project/images/$id.webp",
         width = 100,
@@ -135,16 +151,19 @@ class OcrWorkerRestartTest {
         cropTop = 0f,
         cropRight = 1f,
         cropBottom = 1f,
-        capturedAt = "2026-08-27T00:00:0${sequence}Z",
+        capturedAt = Instant.parse("2026-08-27T00:00:0${sequence}Z"),
         contentHash = "content-$sequence",
         perceptualHash = "perceptual-$sequence",
-        qualityState = "accepted",
-        ocrState = state,
+        qualityState = PageQualityState.NORMAL,
+        ocrState = PageOcrState.entries.single { it.serializedName == state },
     )
 }
 
 @Dao
 internal interface TestOcrSetupDao {
+    @Insert
+    suspend fun insertProject(project: BookProjectEntity)
+
     @Insert
     suspend fun insertPages(pages: List<PageEntity>)
 
@@ -156,12 +175,15 @@ internal interface TestOcrSetupDao {
 }
 
 @Database(
-    entities = [PageEntity::class, OcrResultEntity::class],
+    entities = [BookProjectEntity::class, PageEntity::class, OcrResultEntity::class],
     version = 1,
     exportSchema = false,
 )
+@TypeConverters(PageBinderTypeConverters::class)
 internal abstract class TestOcrDatabase : RoomDatabase() {
     abstract fun ocrJobDao(): OcrJobDao
 
     abstract fun setupDao(): TestOcrSetupDao
 }
+
+private const val PROJECT_ID = "20000000-0000-0000-0000-000000000001"

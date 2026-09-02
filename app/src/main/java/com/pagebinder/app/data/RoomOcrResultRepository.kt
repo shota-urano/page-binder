@@ -4,7 +4,6 @@ import androidx.room.Dao
 import androidx.room.Query
 import com.pagebinder.app.domain.OcrResultRepository
 import com.pagebinder.app.domain.StoredOcrResult
-import java.time.Instant
 import java.util.UUID
 
 /**
@@ -24,6 +23,9 @@ interface OcrResultDao {
         pageId: String,
         editedText: String?,
     ): Int
+
+    @Query("DELETE FROM ocr_results WHERE page_id = :pageId")
+    suspend fun deleteByPageId(pageId: String): Int
 }
 
 class RoomOcrResultRepository(
@@ -38,14 +40,3 @@ class RoomOcrResultRepository(
 
     override suspend fun clearEditedText(pageId: UUID): Boolean = dao.updateEditedText(pageId.toString(), null) == 1
 }
-
-private fun OcrResultEntity.toDomain() =
-    StoredOcrResult(
-        pageId = UUID.fromString(pageId),
-        fullText = fullText,
-        blocksJson = blocksJson,
-        editedText = editedText,
-        engineVersion = engineVersion,
-        sourceImageHash = sourceImageHash,
-        processedAt = Instant.parse(processedAt),
-    )

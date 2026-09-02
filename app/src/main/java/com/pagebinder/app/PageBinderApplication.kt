@@ -5,6 +5,8 @@ import androidx.room.Room
 import com.pagebinder.app.capture.AndroidCaptureFeedbackGateway
 import com.pagebinder.app.capture.AndroidCaptureGateway
 import com.pagebinder.app.capture.CapturePageController
+import com.pagebinder.app.capture.CaptureStatusNotifier
+import com.pagebinder.app.capture.CaptureStatusPresenter
 import com.pagebinder.app.data.PageBinderDatabase
 import com.pagebinder.app.data.RoomBookProjectRepository
 import com.pagebinder.app.data.RoomOcrJobRepository
@@ -14,12 +16,14 @@ import com.pagebinder.app.data.createCaptureFeedbackSettingsRepository
 import com.pagebinder.app.domain.BookProjectRepository
 import com.pagebinder.app.domain.CaptureFeedbackController
 import com.pagebinder.app.domain.CaptureOnePage
+import com.pagebinder.app.domain.CaptureOverlayGateway
 import com.pagebinder.app.domain.CaptureSessionCoordinator
 import com.pagebinder.app.domain.CaptureSessionLifecycle
 import com.pagebinder.app.domain.CaptureStopReason
 import com.pagebinder.app.domain.OcrImageSource
 import com.pagebinder.app.domain.OcrJobRunner
 import com.pagebinder.app.domain.OcrQueue
+import com.pagebinder.app.domain.OcrQueueScheduler
 import com.pagebinder.app.domain.PageRepository
 import com.pagebinder.app.image.FileCaptureImageStore
 import com.pagebinder.app.image.FilePageThumbnailLoader
@@ -38,7 +42,10 @@ import kotlinx.coroutines.launch
 open class PageBinderApplication : Application(), OcrWorkerDependencies {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val database by lazy {
-        Room.databaseBuilder(this, PageBinderDatabase::class.java, DATABASE_NAME).build()
+        Room
+            .databaseBuilder(this, PageBinderDatabase::class.java, DATABASE_NAME)
+            .addMigrations(PageBinderDatabase.MIGRATION_1_2)
+            .build()
     }
     private val repository by lazy { RoomOcrJobRepository(database.ocrJobDao()) }
     val bookProjectRepository: BookProjectRepository by lazy {
@@ -46,19 +53,22 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
     }
     val pageRepository: PageRepository by lazy { RoomPageRepository(database.pageDao()) }
     val pageThumbnailLoader by lazy { FilePageThumbnailLoader(filesDir, pageRepository) }
-    val ocrQueueScheduler by lazy { WorkManagerOcrQueueScheduler(this) }
+    val ocrQueueScheduler by lazy { createOcrQueueScheduler() }
+    private val ocrQueueSessionLifecycle: CaptureSessionLifecycle by lazy {
+        ocrQueueScheduler as CaptureSessionLifecycle
+    }
     val ocrQueue by lazy { OcrQueue(repository, ocrQueueScheduler) }
     val captureSessionLifecycle: CaptureSessionLifecycle by lazy {
         object : CaptureSessionLifecycle {
             override fun onSessionActive() {
-                ocrQueueScheduler.onSessionActive()
+                ocrQueueSessionLifecycle.onSessionActive()
             }
 
             override fun onSessionIdle() {
                 // This is invoked by the coordinator for every stop reason, including an OS
                 // MediaProjection callback, independently of the service StateFlow observer.
                 capturePageController.clear()
-                ocrQueueScheduler.onSessionIdle()
+                ocrQueueSessionLifecycle.onSessionIdle()
             }
         }
     }
@@ -71,7 +81,7 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
     private val captureOnePage by lazy {
         CaptureOnePage(
             captureGateway = captureGateway,
-            overlayGateway = captureOverlayController,
+            overlayGateway = captureStatusPresenter,
             imageStore = FileCaptureImageStore(filesDir),
             pageRepository = pageRepository,
             ocrQueue = ocrQueue,
@@ -83,7 +93,7 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
             captureOnePage = captureOnePage,
             feedback = captureFeedbackController,
             captureGateway = captureGateway,
-            overlayGateway = captureOverlayController,
+            overlayGateway = captureStatusPresenter,
             settingsRepository = autoCaptureSettingsRepository,
             lastSavedFingerprint = { projectId ->
                 pageRepository
@@ -92,9 +102,10 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
                     ?.perceptualHash
             },
             stopSession = { captureSessionCoordinator.stop(CaptureStopReason.EXPLICIT) },
+            onAutoStopped = { reason -> captureStatusNotifier.postAutoStopped(reason) },
         )
     }
-    val captureOverlayController: CaptureOverlayController by lazy {
+    private val captureOverlayController: CaptureOverlayController by lazy {
         CaptureOverlayController(
             context = this,
             onCapture = {
@@ -111,11 +122,17 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
             },
         )
     }
+
+    /** 撮影状態はオーバーレイと常駐通知の両方に出す（docs/specs/06-auto-capture.md §3.4 / FR-AUTO-005） */
+    val captureStatusNotifier: CaptureStatusNotifier by lazy { CaptureStatusNotifier(this) }
+    private val captureStatusPresenter: CaptureOverlayGateway by lazy {
+        CaptureStatusPresenter(captureOverlayController, captureStatusNotifier::post)
+    }
     val captureSessionCoordinator: CaptureSessionCoordinator by lazy {
         CaptureSessionCoordinator(
             captureGateway = captureGateway,
             captureSessionLifecycle = captureSessionLifecycle,
-            overlayGateway = captureOverlayController,
+            overlayGateway = captureStatusPresenter,
             eventScope = applicationScope,
         )
     }
@@ -136,6 +153,9 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
         super.onCreate()
         ocrQueueScheduler.wake()
     }
+
+    /** Allows the instrumentation application to observe the process-start wake without WorkManager. */
+    protected open fun createOcrQueueScheduler(): OcrQueueScheduler = WorkManagerOcrQueueScheduler(this)
 
     private companion object {
         const val DATABASE_NAME = "pagebinder.db"

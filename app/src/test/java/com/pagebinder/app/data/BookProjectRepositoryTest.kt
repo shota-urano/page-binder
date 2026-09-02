@@ -177,7 +177,7 @@ private class InMemoryBookProjectDao : BookProjectDao() {
     }
 
     override suspend fun insert(project: BookProjectEntity) {
-        check(projects.putIfAbsent(project.id, project) == null)
+        check(projects.putIfAbsent(project.id.toString(), project) == null)
     }
 
     override suspend fun findById(id: String): BookProjectEntity? = projects[id]
@@ -185,13 +185,13 @@ private class InMemoryBookProjectDao : BookProjectDao() {
     override suspend fun listActive(): List<BookProjectAggregateEntity> =
         projects.values
             .filter { it.deletedAt == null }
-            .map { BookProjectAggregateEntity(it, pageCounts[it.id] ?: 0) }
+            .map { BookProjectAggregateEntity(it, pageCounts[it.id.toString()] ?: 0) }
 
     override suspend fun listTrash(): List<BookProjectAggregateEntity> =
         projects.values
             .filter { it.deletedAt != null }
             .sortedByDescending { it.deletedAt }
-            .map { BookProjectAggregateEntity(it, pageCounts[it.id] ?: 0) }
+            .map { BookProjectAggregateEntity(it, pageCounts[it.id.toString()] ?: 0) }
 
     override suspend fun findSummaryById(id: String): BookProjectAggregateEntity? =
         projects[id]?.let { BookProjectAggregateEntity(it, pageCounts[id] ?: 0) }
@@ -202,23 +202,23 @@ private class InMemoryBookProjectDao : BookProjectDao() {
         author: String?,
         note: String?,
         updatedAt: String,
-    ): Int = update(id) { copy(title = title, author = author, note = note, updatedAt = updatedAt) }
+    ): Int = update(id) { copy(title = title, author = author, note = note, updatedAt = Instant.parse(updatedAt)) }
 
     override suspend fun moveToTrash(
         id: String,
         deletedAt: String,
-    ): Int = update(id) { copy(updatedAt = deletedAt, deletedAt = deletedAt) }
+    ): Int = update(id) { copy(updatedAt = Instant.parse(deletedAt), deletedAt = Instant.parse(deletedAt)) }
 
     override suspend fun restore(
         id: String,
         updatedAt: String,
-    ): Int = update(id) { copy(updatedAt = updatedAt, deletedAt = null) }
+    ): Int = update(id) { copy(updatedAt = Instant.parse(updatedAt), deletedAt = null) }
 
     override suspend fun findExpiredTrashIds(cutoff: String): List<String> =
         projects.values
-            .filter { it.deletedAt != null && it.deletedAt <= cutoff }
+            .filter { it.deletedAt != null && it.deletedAt <= Instant.parse(cutoff) }
             .sortedBy { it.deletedAt }
-            .map(BookProjectEntity::id)
+            .map { it.id.toString() }
 
     override suspend fun deleteOcrResults(projectId: String) = Unit
 

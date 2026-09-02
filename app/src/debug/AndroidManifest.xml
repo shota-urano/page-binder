@@ -42,6 +42,12 @@
             android:exported="true"
             android:label="@string/page_edit_preview_label"
             android:theme="@style/Theme.PageBinder" />
+        <!-- debug 専用の連続撮影フローティングUIプレビュー。ランチャーには出さず `adb shell am start` で開く -->
+        <activity
+            android:name=".preview.FloatingUiPreviewActivity"
+            android:exported="true"
+            android:label="@string/floating_ui_preview_label"
+            android:theme="@style/Theme.PageBinder" />
         <!-- debug 専用の重複・黒画面の確認プレビュー。ランチャーには出さず `adb shell am start` で開く -->
         <activity
             android:name=".preview.DuplicateReviewScreenPreviewActivity"

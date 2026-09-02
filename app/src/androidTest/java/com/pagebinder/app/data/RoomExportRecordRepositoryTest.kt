@@ -3,6 +3,7 @@ package com.pagebinder.app.data
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pagebinder.app.domain.ExportRecord
@@ -186,6 +187,7 @@ class RoomExportRecordRepositoryTest {
     version = 1,
     exportSchema = false,
 )
+@TypeConverters(PageBinderTypeConverters::class)
 abstract class TestExportRecordDatabase : RoomDatabase() {
     abstract fun exportRecordDao(): ExportRecordDao
 }

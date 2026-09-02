@@ -5,6 +5,7 @@ import com.pagebinder.app.domain.AutoCaptureDecision
 import com.pagebinder.app.domain.AutoCaptureMachine
 import com.pagebinder.app.domain.AutoCaptureSettings
 import com.pagebinder.app.domain.AutoCaptureSettingsRepository
+import com.pagebinder.app.domain.AutoCaptureStopReason
 import com.pagebinder.app.domain.CaptureFeedbackController
 import com.pagebinder.app.domain.CaptureGateway
 import com.pagebinder.app.domain.CaptureMode
@@ -30,6 +31,8 @@ class CapturePageController(
     private val settingsRepository: AutoCaptureSettingsRepository,
     private val lastSavedFingerprint: suspend (UUID) -> String?,
     private val stopSession: () -> Unit,
+    /** 上限到達による自動停止だけを知らせる（docs/specs/06-auto-capture.md §6） */
+    private val onAutoStopped: (AutoCaptureStopReason) -> Unit = {},
 ) {
     private var projectId: UUID? = null
     private var continuousJob: Job? = null
@@ -119,6 +122,7 @@ class CapturePageController(
                     when (decision) {
                         is AutoCaptureDecision.Saved ->
                             if (decision.stopReason != null) {
+                                onAutoStopped(decision.stopReason)
                                 stopSession()
                                 return@launch
                             }
@@ -126,6 +130,7 @@ class CapturePageController(
                         is AutoCaptureDecision.Isolated ->
                             autoCaptureMutex.withLock { feedback.present(decision.result) }
                         is AutoCaptureDecision.Stopped -> {
+                            onAutoStopped(decision.reason)
                             stopSession()
                             return@launch
                         }

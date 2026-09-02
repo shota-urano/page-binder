@@ -358,7 +358,7 @@ private class InMemoryPageDao : PageDao() {
     }
 
     override suspend fun insert(page: PageEntity) {
-        check(pages.putIfAbsent(page.id, page) == null)
+        check(pages.putIfAbsent(page.id.toString(), page) == null)
     }
 
     override suspend fun insertAll(pages: List<PageEntity>) {
@@ -368,7 +368,7 @@ private class InMemoryPageDao : PageDao() {
     override suspend fun findById(id: String): PageEntity? = pages[id]
 
     override suspend fun findByProject(projectId: String): List<PageEntity> =
-        pages.values.filter { it.projectId == projectId }.sortedBy(PageEntity::sequence)
+        pages.values.filter { it.projectId.toString() == projectId }.sortedBy(PageEntity::sequence)
 
     override suspend fun updateSequence(
         id: String,
@@ -380,12 +380,15 @@ private class InMemoryPageDao : PageDao() {
     override suspend fun updateQualityState(
         id: String,
         qualityState: String,
-    ): Int = update(id) { copy(qualityState = qualityState) }
+    ): Int =
+        update(id) {
+            copy(qualityState = PageQualityState.entries.single { it.serializedName == qualityState })
+        }
 
     override suspend fun updateRotationAndMarkStale(
         id: String,
         rotation: Int,
-    ): Int = update(id) { copy(rotation = rotation, ocrState = PageOcrState.STALE.serializedName) }
+    ): Int = update(id) { copy(rotation = rotation, ocrState = PageOcrState.STALE) }
 
     override suspend fun updateCropAndMarkStale(
         id: String,
@@ -403,7 +406,7 @@ private class InMemoryPageDao : PageDao() {
                     cropTop = top,
                     cropRight = right,
                     cropBottom = bottom,
-                    ocrState = PageOcrState.STALE.serializedName,
+                    ocrState = PageOcrState.STALE,
                 )
             }
         }
@@ -412,7 +415,10 @@ private class InMemoryPageDao : PageDao() {
         id: String,
         rotation: Int,
         ocrState: String,
-    ): Int = update(id) { copy(rotation = rotation, ocrState = ocrState) }
+    ): Int =
+        update(id) {
+            copy(rotation = rotation, ocrState = PageOcrState.entries.single { it.serializedName == ocrState })
+        }
 
     override suspend fun restoreCrop(
         id: String,
@@ -428,7 +434,7 @@ private class InMemoryPageDao : PageDao() {
                 cropTop = top,
                 cropRight = right,
                 cropBottom = bottom,
-                ocrState = ocrState,
+                ocrState = PageOcrState.entries.single { it.serializedName == ocrState },
             )
         }
 
