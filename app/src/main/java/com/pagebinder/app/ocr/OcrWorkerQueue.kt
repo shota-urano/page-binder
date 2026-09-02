@@ -14,7 +14,6 @@ import com.pagebinder.app.domain.OcrJobRunner
 import com.pagebinder.app.domain.OcrQueueScheduler
 import com.pagebinder.app.domain.OcrRunResult
 import kotlinx.coroutines.CancellationException
-import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -111,8 +110,3 @@ class OcrWorker(
 interface OcrWorkerDependencies {
     val ocrJobRunner: OcrJobRunner
 }
-
-internal fun safeOcrImageFile(
-    filesDir: File,
-    relativePath: String,
-): File = com.pagebinder.app.storage.FileImageStore(filesDir).resolve(relativePath)
