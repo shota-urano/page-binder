@@ -25,6 +25,18 @@ class BackupExclusionRulesTest {
         exclusionsByMode.values.forEach(::assertRequiredExclusions)
     }
 
+    @Test
+    fun manifestReferencesBackupExclusionRuleResources() {
+        assertEquals(
+            R.xml.backup_rules,
+            manifestApplicationAttributeResourceId("fullBackupContent"),
+        )
+        assertEquals(
+            R.xml.data_extraction_rules,
+            manifestApplicationAttributeResourceId("dataExtractionRules"),
+        )
+    }
+
     private fun assertRequiredExclusions(exclusions: Set<BackupExclusion>) {
         // FileImageStore stores originals below files/projects/{projectId}/images/.
         assertTrue("working images must be excluded", BackupExclusion("file", "projects") in exclusions)
@@ -65,6 +77,16 @@ class BackupExclusionRulesTest {
         return exclusionsByMode
     }
 
+    private fun manifestApplicationAttributeResourceId(attributeName: String): Int =
+        context.assets.openXmlResourceParser("AndroidManifest.xml").use { parser ->
+            while (parser.next() != XmlPullParser.END_DOCUMENT) {
+                if (parser.eventType == XmlPullParser.START_TAG && parser.name == "application") {
+                    return parser.getAttributeResourceValue(ANDROID_NAMESPACE, attributeName, 0)
+                }
+            }
+            error("application element is missing from AndroidManifest.xml")
+        }
+
     private fun XmlPullParser.exclusion(): BackupExclusion =
         BackupExclusion(
             domain = getAttributeValue(null, "domain"),
@@ -75,4 +97,8 @@ class BackupExclusionRulesTest {
         val domain: String,
         val path: String,
     )
+
+    private companion object {
+        const val ANDROID_NAMESPACE = "http://schemas.android.com/apk/res/android"
+    }
 }
