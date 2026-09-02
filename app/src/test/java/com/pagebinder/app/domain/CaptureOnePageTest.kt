@@ -194,7 +194,7 @@ class CaptureOnePageTest {
 
     private class RecordingStore(
         private val qualityState: PageQualityState = PageQualityState.NORMAL,
-    ) : CaptureImageStore {
+    ) : ImageStore {
         var rollbackCount = 0
 
         override fun saveAtomically(

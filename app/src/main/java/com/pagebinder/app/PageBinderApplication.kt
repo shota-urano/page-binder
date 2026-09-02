@@ -25,13 +25,12 @@ import com.pagebinder.app.domain.OcrJobRunner
 import com.pagebinder.app.domain.OcrQueue
 import com.pagebinder.app.domain.OcrQueueScheduler
 import com.pagebinder.app.domain.PageRepository
-import com.pagebinder.app.image.FileCaptureImageStore
 import com.pagebinder.app.image.FilePageThumbnailLoader
 import com.pagebinder.app.ocr.AndroidOcrExecutionPolicy
 import com.pagebinder.app.ocr.MlKitOcrGateway
 import com.pagebinder.app.ocr.OcrWorkerDependencies
 import com.pagebinder.app.ocr.WorkManagerOcrQueueScheduler
-import com.pagebinder.app.ocr.safeOcrImageFile
+import com.pagebinder.app.storage.FileImageStore
 import com.pagebinder.app.storage.FileProjectFileStore
 import com.pagebinder.app.ui.overlay.CaptureOverlayController
 import kotlinx.coroutines.CoroutineScope
@@ -52,7 +51,8 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
         RoomBookProjectRepository(database.bookProjectDao(), FileProjectFileStore(filesDir))
     }
     val pageRepository: PageRepository by lazy { RoomPageRepository(database.pageDao()) }
-    val pageThumbnailLoader by lazy { FilePageThumbnailLoader(filesDir, pageRepository) }
+    private val imageStore by lazy { FileImageStore(filesDir) }
+    val pageThumbnailLoader by lazy { FilePageThumbnailLoader(imageStore, pageRepository) }
     val ocrQueueScheduler by lazy { createOcrQueueScheduler() }
     private val ocrQueueSessionLifecycle: CaptureSessionLifecycle by lazy {
         ocrQueueScheduler as CaptureSessionLifecycle
@@ -82,7 +82,7 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
         CaptureOnePage(
             captureGateway = captureGateway,
             overlayGateway = captureStatusPresenter,
-            imageStore = FileCaptureImageStore(filesDir),
+            imageStore = imageStore,
             pageRepository = pageRepository,
             ocrQueue = ocrQueue,
         )
@@ -142,7 +142,7 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
             repository = repository,
             gateway = MlKitOcrGateway(),
             imageSourceFactory = { relativePath ->
-                val file = safeOcrImageFile(filesDir, relativePath)
+                val file = imageStore.resolve(relativePath)
                 OcrImageSource(file::inputStream)
             },
             executionPolicy = AndroidOcrExecutionPolicy(this),

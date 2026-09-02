@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- FileImageStore: files/projects/{projectId}/images/{pageId}.webp. -->
+    <exclude domain="file" path="projects" />
+    <!-- PageBinderApplication.DATABASE_NAME. This also excludes OCR fullText and blocksJson. -->
+    <exclude domain="database" path="pagebinder.db" />
+</full-backup-content>

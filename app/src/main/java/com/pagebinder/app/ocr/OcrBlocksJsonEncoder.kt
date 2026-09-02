@@ -1,8 +1,6 @@
 package com.pagebinder.app.ocr
 
 import com.google.mlkit.vision.text.Text
-import org.json.JSONArray
-import org.json.JSONObject
 
 internal object OcrBlocksJsonEncoder {
     fun encode(
@@ -10,67 +8,45 @@ internal object OcrBlocksJsonEncoder {
         mapper: OcrCoordinateMapper,
         blockOrder: List<Int> = text.textBlocks.indices.toList(),
     ): String =
-        JSONObject()
-            .put("schemaVersion", SCHEMA_VERSION)
-            .put(
-                "blocks",
-                JSONArray().apply {
-                    blockOrder.forEachIndexed { blockIndex, sourceIndex ->
+        OcrBlocksJsonCodec.encode(
+            OcrBlocksJson(
+                blocks =
+                    blockOrder.mapIndexed { blockIndex, sourceIndex ->
                         val block = text.textBlocks[sourceIndex]
-                        put(
-                            JSONObject()
-                                .put("index", blockIndex)
-                                .put("text", block.text)
-                                .put(
-                                    "rect",
-                                    mapper
-                                        .toOriginal(block.boundingBoxOrEmpty().toPixelRect())
-                                        .toJson(),
-                                )
-                                .put(
-                                    "lines",
-                                    JSONArray().apply {
-                                        block.lines.forEachIndexed { lineIndex, line ->
-                                            put(
-                                                JSONObject()
-                                                    .put("index", lineIndex)
-                                                    .put("text", line.text)
-                                                    .put(
-                                                        "rect",
+                        OcrBlockJson(
+                            index = blockIndex,
+                            text = block.text,
+                            rect =
+                                mapper
+                                    .toOriginal(block.boundingBoxOrEmpty().toPixelRect())
+                                    .toJsonRect(),
+                            lines =
+                                block.lines.mapIndexed { lineIndex, line ->
+                                    OcrLineJson(
+                                        index = lineIndex,
+                                        text = line.text,
+                                        rect =
+                                            mapper
+                                                .toOriginal(line.boundingBoxOrEmpty().toPixelRect())
+                                                .toJsonRect(),
+                                        elements =
+                                            line.elements.mapIndexed { elementIndex, element ->
+                                                OcrElementJson(
+                                                    index = elementIndex,
+                                                    text = element.text,
+                                                    rect =
                                                         mapper
-                                                            .toOriginal(line.boundingBoxOrEmpty().toPixelRect())
-                                                            .toJson(),
-                                                    )
-                                                    .put(
-                                                        "elements",
-                                                        JSONArray().apply {
-                                                            line.elements.forEachIndexed { elementIndex, element ->
-                                                                put(
-                                                                    JSONObject()
-                                                                        .put("index", elementIndex)
-                                                                        .put("text", element.text)
-                                                                        .put(
-                                                                            "rect",
-                                                                            mapper
-                                                                                .toOriginal(
-                                                                                    element
-                                                                                        .boundingBoxOrEmpty()
-                                                                                        .toPixelRect(),
-                                                                                )
-                                                                                .toJson(),
-                                                                        ),
-                                                                )
-                                                            }
-                                                        },
-                                                    ),
-                                            )
-                                        }
-                                    },
-                                ),
+                                                            .toOriginal(
+                                                                element.boundingBoxOrEmpty().toPixelRect(),
+                                                            ).toJsonRect(),
+                                                )
+                                            },
+                                    )
+                                },
                         )
-                    }
-                },
-            ).toString()
+                    },
+            ),
+        )
 
     private fun Text.TextBlock.boundingBoxOrEmpty() = boundingBox ?: android.graphics.Rect()
 
@@ -80,12 +56,5 @@ internal object OcrBlocksJsonEncoder {
 
     private fun android.graphics.Rect.toPixelRect() = OcrPixelRect(left, top, right, bottom)
 
-    private fun OcrPixelRect.toJson(): JSONObject =
-        JSONObject()
-            .put("left", left)
-            .put("top", top)
-            .put("right", right)
-            .put("bottom", bottom)
-
-    private const val SCHEMA_VERSION = 1
+    private fun OcrPixelRect.toJsonRect() = OcrJsonRect(left, top, right, bottom)
 }
