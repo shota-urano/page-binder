@@ -201,6 +201,17 @@ class AndroidCaptureGateway(
                     resizeCaptureSurface(CaptureSize(width, height))
                 }
             }
+
+            override fun onCapturedContentVisibilityChanged(isVisible: Boolean) {
+                // This callback is available from API 34 and is only reported for a single-app
+                // share. A false value means the selected app is no longer capturable; continuing
+                // would only turn subsequent page requests into generic no-frame failures.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !isVisible) {
+                    eventChannel.trySend(
+                        CaptureGatewayEvent.ProjectionStopped(CaptureStopReason.SHARED_CONTENT_NOT_VISIBLE),
+                    )
+                }
+            }
         }
 
     /** Keeps the sole VirtualDisplay and swaps its ImageReader surface for subsequent frames. */

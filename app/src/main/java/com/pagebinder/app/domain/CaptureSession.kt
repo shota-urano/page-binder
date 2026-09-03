@@ -74,6 +74,7 @@ enum class CaptureStopReason {
     OS_STOPPED,
     OTHER_PROJECTION_STARTED,
     SCREEN_LOCKED,
+    SHARED_CONTENT_NOT_VISIBLE,
     ERROR,
 }
 
