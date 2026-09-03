@@ -65,6 +65,30 @@ class BitmapImageTransformerTest {
         check(originalFile.delete())
     }
 
+    @Test
+    fun transformUsesSharedIntegerBoundsForNonIntegerCropEdges() {
+        val source = patternedBitmap(width = 100, height = 100)
+
+        listOf(
+            Triple(0.123f, 0.876f, 76),
+            Triple(0.53f, 1f, 47),
+            Triple(0.129995f, 0.870005f, 76),
+        ).forEach { (left, right, expectedWidth) ->
+            val transformed =
+                BitmapImageTransformer.transform(
+                    source = source,
+                    rotationDegrees = 0,
+                    crop = PageCrop(left = left, right = right),
+                )
+
+            assertEquals(expectedWidth, transformed.width)
+            assertEquals(100, transformed.height)
+            transformed.recycle()
+        }
+
+        source.recycle()
+    }
+
     private fun patternedBitmap(
         width: Int,
         height: Int,
