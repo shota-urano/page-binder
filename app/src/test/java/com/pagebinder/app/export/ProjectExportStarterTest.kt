@@ -27,6 +27,7 @@ import com.pagebinder.app.domain.PdfGateway
 import com.pagebinder.app.domain.PdfInput
 import com.pagebinder.app.domain.PdfMode
 import com.pagebinder.app.domain.StoredOcrResult
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -287,6 +288,8 @@ class ProjectExportStarterTest {
         override suspend fun findById(id: UUID): BookProject? = project.takeIf { it.id == id }
 
         override suspend fun findSummaryById(id: UUID): BookProjectSummary? = error("Not used by export")
+
+        override fun observeSummaryById(id: UUID): Flow<BookProjectSummary?> = error("Not used by export")
 
         override suspend fun update(
             id: UUID,

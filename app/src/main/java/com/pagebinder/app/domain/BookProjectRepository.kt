@@ -1,5 +1,6 @@
 package com.pagebinder.app.domain
 
+import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 import java.util.UUID
 
@@ -50,6 +51,14 @@ interface BookProjectRepository {
     suspend fun findById(id: UUID): BookProject?
 
     suspend fun findSummaryById(id: UUID): BookProjectSummary?
+
+    /**
+     * 書籍詳細の統計（ページ数・OCR完了数・エラー数・使用容量、docs/specs/03-book-project.md §3.4）を購読する。
+     *
+     * ページの追加・削除・OCR状態の変化のたびに現在値を流すので、撮影オーバーレイの裏で書籍詳細が
+     * 前面に残ったままでも統計が更新される。書籍が存在しない場合は null を流す。
+     */
+    fun observeSummaryById(id: UUID): Flow<BookProjectSummary?>
 
     suspend fun update(
         id: UUID,

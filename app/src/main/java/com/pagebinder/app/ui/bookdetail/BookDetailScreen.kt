@@ -39,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -53,6 +54,15 @@ import com.pagebinder.app.ui.theme.ColorTextSecondary
 import com.pagebinder.app.ui.theme.MinTouchTarget
 import com.pagebinder.app.ui.theme.ScreenHorizontalMargin
 import com.pagebinder.app.ui.theme.SpaceUnit
+
+/**
+ * 統計の値だけを一意に指す印。ページ数・OCR完了・エラーは同じ数字が並ぶため、
+ * 「撮影でページが増えたときに統計が更新される」ことを UI テストから読むには印が要る。
+ */
+const val BOOK_DETAIL_PAGE_COUNT_TEST_TAG = "book-detail-page-count"
+const val BOOK_DETAIL_OCR_COMPLETED_TEST_TAG = "book-detail-ocr-completed"
+const val BOOK_DETAIL_OCR_ERROR_TEST_TAG = "book-detail-ocr-error"
+const val BOOK_DETAIL_STORAGE_TEST_TAG = "book-detail-storage"
 
 data class BookDetailActions(
     val onBack: () -> Unit,
@@ -245,7 +255,12 @@ private fun StatisticsCard(uiState: BookDetailUiState) {
     ) {
         Column(Modifier.padding(SpaceUnit * 2)) {
             Row(modifier = Modifier.height(IntrinsicSize.Min)) {
-                Statistic(R.string.book_detail_page_count, uiState.pageCount.toString(), Modifier.weight(1f))
+                Statistic(
+                    R.string.book_detail_page_count,
+                    uiState.pageCount.toString(),
+                    Modifier.weight(1f),
+                    valueTestTag = BOOK_DETAIL_PAGE_COUNT_TEST_TAG,
+                )
                 VerticalDivider(modifier = Modifier.fillMaxHeight(), color = ColorDivider)
                 Statistic(
                     R.string.book_detail_ocr_completed,
@@ -253,6 +268,7 @@ private fun StatisticsCard(uiState: BookDetailUiState) {
                     Modifier.weight(1f),
                     ColorAccent,
                     showCheck = true,
+                    valueTestTag = BOOK_DETAIL_OCR_COMPLETED_TEST_TAG,
                 )
             }
             HorizontalDivider(Modifier.padding(vertical = SpaceUnit), color = ColorDivider)
@@ -262,12 +278,14 @@ private fun StatisticsCard(uiState: BookDetailUiState) {
                     uiState.ocrErrorCount.toString(),
                     Modifier.weight(1f),
                     if (uiState.ocrErrorCount > 0) ColorError else MaterialTheme.colorScheme.onSurface,
+                    valueTestTag = BOOK_DETAIL_OCR_ERROR_TEST_TAG,
                 )
                 VerticalDivider(modifier = Modifier.fillMaxHeight(), color = ColorDivider)
                 Statistic(
                     R.string.book_detail_storage,
                     formatStorageBytes(uiState.storageBytes),
                     Modifier.weight(1f),
+                    valueTestTag = BOOK_DETAIL_STORAGE_TEST_TAG,
                 )
             }
         }
@@ -281,12 +299,18 @@ private fun Statistic(
     modifier: Modifier,
     valueColor: Color = MaterialTheme.colorScheme.onSurface,
     showCheck: Boolean = false,
+    valueTestTag: String? = null,
 ) {
     Column(modifier.padding(horizontal = SpaceUnit)) {
         Text(stringResource(labelRes), style = MaterialTheme.typography.bodyMedium, color = ColorTextSecondary)
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (showCheck) Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = ColorAccent)
-            Text(value, style = MaterialTheme.typography.headlineSmall, color = valueColor)
+            Text(
+                value,
+                modifier = if (valueTestTag == null) Modifier else Modifier.testTag(valueTestTag),
+                style = MaterialTheme.typography.headlineSmall,
+                color = valueColor,
+            )
         }
     }
 }
