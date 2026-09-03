@@ -129,6 +129,16 @@ fun BookDetailScreen(
                             DetailAction(R.string.book_detail_settings, actions.onBookSettings, divider = false)
                         }
                     }
+                    // 無効な導線は理由まで出す（押せるのに何も起きない状態を残さない）。
+                    // ページ0件時の表示はデザイン素材に無いため（docs/design/03-book-detail.md 未定事項）
+                    // 補助テキストで最小限に説明する
+                    if (!actions.exportAvailable && uiState.pageCount == 0) {
+                        Text(
+                            stringResource(R.string.book_detail_export_unavailable),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = ColorTextSecondary,
+                        )
+                    }
                     TextButton(
                         onClick = actions.onMoveToTrashRequested,
                         modifier = Modifier.align(Alignment.End).heightIn(min = MinTouchTarget),

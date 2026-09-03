@@ -20,6 +20,7 @@ import com.pagebinder.app.domain.BookProjectRepository
 import com.pagebinder.app.domain.CaptureGateway
 import com.pagebinder.app.domain.ConsentRepository
 import com.pagebinder.app.domain.ExportRecordRepository
+import com.pagebinder.app.domain.ExportStarter
 import com.pagebinder.app.domain.ExportStorageGateway
 import com.pagebinder.app.domain.ImageStore
 import com.pagebinder.app.domain.OcrGateway
@@ -28,7 +29,11 @@ import com.pagebinder.app.domain.OcrResultRepository
 import com.pagebinder.app.domain.PageRepository
 import com.pagebinder.app.domain.PdfGateway
 import com.pagebinder.app.domain.SettingsRepository
+import com.pagebinder.app.export.ExportPageImageSource
+import com.pagebinder.app.export.ExportRecordCoordinator
 import com.pagebinder.app.export.PdfBoxPdfGateway
+import com.pagebinder.app.export.ProjectExportStarter
+import com.pagebinder.app.image.FileExportPageImageSource
 import com.pagebinder.app.ocr.MlKitOcrGateway
 import com.pagebinder.app.storage.FileImageStore
 import com.pagebinder.app.storage.FileProjectFileStore
@@ -138,6 +143,40 @@ object AppDataModule {
 
     @Provides
     @Singleton
+    fun provideExportPageImageSource(imageStore: FileImageStore): ExportPageImageSource =
+        FileExportPageImageSource(imageStore)
+
+    /**
+     * 書き出し画面が呼ぶ [ExportStarter] の本番実装。
+     * 一時出力は書籍ごとの `exports-cache/`（[FileImageStore.exportsCacheDirectory]）を使う。
+     */
+    @Provides
+    @Singleton
+    fun provideExportStarter(
+        @ApplicationContext context: Context,
+        bookProjectRepository: BookProjectRepository,
+        pageRepository: PageRepository,
+        ocrResultRepository: OcrResultRepository,
+        pageImageSource: ExportPageImageSource,
+        imageStore: FileImageStore,
+        exportRecordRepository: ExportRecordRepository,
+        storageGateway: ExportStorageGateway,
+        pdfGateway: PdfGateway,
+    ): ExportStarter =
+        ProjectExportStarter(
+            bookProjectRepository = bookProjectRepository,
+            pageRepository = pageRepository,
+            ocrResultRepository = ocrResultRepository,
+            pageImageSource = pageImageSource,
+            exportsCacheDirectory = imageStore::exportsCacheDirectory,
+            recordCoordinator = ExportRecordCoordinator(exportRecordRepository),
+            storageGateway = storageGateway,
+            pdfGateway = pdfGateway,
+            appVersion = context.appVersionName(),
+        )
+
+    @Provides
+    @Singleton
     fun provideSettingsRepository(
         @ApplicationContext context: Context,
     ): SettingsRepository = createAutoCaptureSettingsRepository(context)
@@ -150,3 +189,10 @@ object AppDataModule {
 
     private const val DATABASE_NAME = "pagebinder.db"
 }
+
+/** manifest.json の `app.version`（docs/specs/02-data-model.md §3.5）。取得できない端末では空文字にする */
+@Suppress("DEPRECATION")
+private fun Context.appVersionName(): String =
+    runCatching { packageManager.getPackageInfo(packageName, 0).versionName }
+        .getOrNull()
+        .orEmpty()

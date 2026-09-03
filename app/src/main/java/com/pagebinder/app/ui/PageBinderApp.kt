@@ -18,6 +18,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pagebinder.app.domain.AutoCaptureSettingsRepository
 import com.pagebinder.app.domain.BookProjectRepository
 import com.pagebinder.app.domain.CaptureFeedbackSettingsRepository
+import com.pagebinder.app.domain.ExportProjectSummary
+import com.pagebinder.app.domain.ExportStarter
 import com.pagebinder.app.domain.PageRepository
 import com.pagebinder.app.ui.bookdetail.BookDetailActions
 import com.pagebinder.app.ui.bookdetail.BookDetailScreen
@@ -31,8 +33,12 @@ import com.pagebinder.app.ui.captureprep.CapturePrepViewModel
 import com.pagebinder.app.ui.consent.ConsentGate
 import com.pagebinder.app.ui.consent.ConsentScreen
 import com.pagebinder.app.ui.consent.ConsentUiState
+import com.pagebinder.app.ui.export.ExportRoute
+import com.pagebinder.app.ui.export.ExportViewModel
 import com.pagebinder.app.ui.home.HomeScreen
 import com.pagebinder.app.ui.home.HomeViewModel
+import com.pagebinder.app.ui.pageedit.PageEditRoute
+import com.pagebinder.app.ui.pageedit.PageEditViewModel
 import com.pagebinder.app.ui.pagelist.PageListRoute
 import com.pagebinder.app.ui.pagelist.PageListViewModel
 import com.pagebinder.app.ui.pagelist.PageThumbnailLoader
@@ -55,6 +61,7 @@ fun PageBinderApp(
     bookProjectRepository: BookProjectRepository,
     pageRepository: PageRepository,
     pageThumbnailLoader: PageThumbnailLoader,
+    exportStarter: ExportStarter,
     enqueueProjectOcr: suspend (UUID) -> Int,
     autoCaptureSettingsRepository: AutoCaptureSettingsRepository,
     captureFeedbackSettingsRepository: CaptureFeedbackSettingsRepository,
@@ -75,6 +82,7 @@ fun PageBinderApp(
                     repository = bookProjectRepository,
                     pageRepository = pageRepository,
                     pageThumbnailLoader = pageThumbnailLoader,
+                    exportStarter = exportStarter,
                     enqueueProjectOcr = enqueueProjectOcr,
                     autoCaptureSettingsRepository = autoCaptureSettingsRepository,
                     captureFeedbackSettingsRepository = captureFeedbackSettingsRepository,
@@ -95,6 +103,7 @@ private fun PageBinderMain(
     repository: BookProjectRepository,
     pageRepository: PageRepository,
     pageThumbnailLoader: PageThumbnailLoader,
+    exportStarter: ExportStarter,
     enqueueProjectOcr: suspend (UUID) -> Int,
     autoCaptureSettingsRepository: AutoCaptureSettingsRepository,
     captureFeedbackSettingsRepository: CaptureFeedbackSettingsRepository,
@@ -111,6 +120,9 @@ private fun PageBinderMain(
                 MainDestination.Trash -> MainDestination.Home
                 is MainDestination.PageList -> MainDestination.Detail(current.projectId)
                 is MainDestination.CapturePrep -> MainDestination.Detail(current.projectId)
+                is MainDestination.Export -> MainDestination.Detail(current.project.projectId)
+                is MainDestination.PageEdit ->
+                    MainDestination.PageList(current.projectId, reloadToken = UUID.randomUUID())
             }
     }
     when (val current = destination) {
@@ -201,7 +213,20 @@ private fun PageBinderMain(
                         },
                         onPageList = { destination = MainDestination.PageList(current.projectId) },
                         onOcrBatch = detailViewModel::onOcrBatchRequested,
-                        onExport = {},
+                        onExport = {
+                            destination =
+                                MainDestination.Export(
+                                    ExportProjectSummary(
+                                        projectId = current.projectId,
+                                        title = detailState.title,
+                                        pageCount = detailState.pageCount,
+                                        // OCR完了以外（未処理・実行中・失敗・stale）が FR-EXP-009 の警告件数
+                                        ocrIncompletePageCount =
+                                            (detailState.pageCount - detailState.ocrCompletedCount)
+                                                .coerceIn(0, detailState.pageCount),
+                                    ),
+                                )
+                        },
                         onBookSettings = { destination = MainDestination.Edit(current.projectId) },
                         onMoveToTrashRequested = detailViewModel::onMoveToTrashRequested,
                         onMoveToTrashConfirmed = detailViewModel::onMoveToTrashConfirmed,
@@ -209,7 +234,8 @@ private fun PageBinderMain(
                         onReload = detailViewModel::load,
                         manualCaptureAvailable = !detailState.loading,
                         continuousCaptureAvailable = !detailState.loading,
-                        exportAvailable = false,
+                        // 1ページも無い書籍には書き出す成果物が無い（docs/specs/11-export.md §2 入力）
+                        exportAvailable = !detailState.loading && detailState.pageCount > 0,
                     ),
             )
         }
@@ -234,11 +260,17 @@ private fun PageBinderMain(
                     key = "page-list-${current.projectId}",
                     factory = PageListViewModel.factory(current.projectId, pageRepository),
                 )
+            // 回転・切り取り編集から戻ったときだけ読み直す（編集結果をサムネイルへ反映するため）
+            LaunchedEffect(current.reloadToken) {
+                if (current.reloadToken != null) pageListViewModel.load()
+            }
             PageListRoute(
                 viewModel = pageListViewModel,
                 thumbnailLoader = pageThumbnailLoader,
                 onBack = { destination = MainDestination.Detail(current.projectId) },
-                onPageOpened = {},
+                onPageOpened = { pageId ->
+                    destination = MainDestination.PageEdit(current.projectId, pageId)
+                },
             )
         }
         is MainDestination.CapturePrep -> {
@@ -263,6 +295,41 @@ private fun PageBinderMain(
                 onCaptureDenied = { destination = MainDestination.Detail(current.projectId) },
             )
         }
+        is MainDestination.Export -> {
+            val exportViewModel: ExportViewModel =
+                viewModel(
+                    // 書き出しごとに作り直す。権限確認・OCR未完了の続行は前回の選択を持ち越さない
+                    // （docs/specs/12-legal-guardrails.md §3.2 / FR-EXP-009）
+                    key = "export-${current.instanceId}",
+                    factory = ExportViewModel.factory(current.project, exportStarter),
+                )
+            ExportRoute(
+                viewModel = exportViewModel,
+                onBack = { destination = MainDestination.Detail(current.project.projectId) },
+            )
+        }
+        is MainDestination.PageEdit -> {
+            val pageEditViewModel: PageEditViewModel =
+                viewModel(
+                    key = "page-edit-${current.instanceId}",
+                    factory = PageEditViewModel.factory(current.pageId, pageRepository),
+                )
+            val pageEditState by pageEditViewModel.uiState.collectAsStateWithLifecycle()
+            val closePageEdit = {
+                destination =
+                    MainDestination.PageList(current.projectId, reloadToken = UUID.randomUUID())
+            }
+            // 外側の BackHandler より後に登録されるのでこちらが先に呼ばれる。
+            // 未保存の変更があるときは破棄確認を挟む（PageEditRoute の閉じる操作と同じ判断）
+            BackHandler {
+                if (pageEditState.unsavedChanges) pageEditViewModel.onDiscardRequested() else closePageEdit()
+            }
+            PageEditRoute(
+                viewModel = pageEditViewModel,
+                imageLoader = pageThumbnailLoader,
+                onClose = closePageEdit,
+            )
+        }
     }
 }
 
@@ -278,11 +345,31 @@ private sealed interface MainDestination {
 
     data object Trash : MainDestination
 
-    data class PageList(val projectId: UUID) : MainDestination
+    /**
+     * [reloadToken] はページ編集から戻ったときだけ値が変わり、一覧の読み直しの合図になる
+     * （書籍詳細から入る通常の遷移では null）。
+     */
+    data class PageList(
+        val projectId: UUID,
+        val reloadToken: UUID? = null,
+    ) : MainDestination
 
     data class CapturePrep(
         val projectId: UUID,
         val bookTitle: String,
         val mode: CaptureMode,
+    ) : MainDestination
+
+    /** 書き出し画面（docs/specs/11-export.md §3.2 手順1）。要約は書籍詳細が組み立てて渡す */
+    data class Export(
+        val project: ExportProjectSummary,
+        val instanceId: UUID = UUID.randomUUID(),
+    ) : MainDestination
+
+    /** 回転・切り取り編集画面（docs/specs/08-page-editing.md §3.2） */
+    data class PageEdit(
+        val projectId: UUID,
+        val pageId: UUID,
+        val instanceId: UUID = UUID.randomUUID(),
     ) : MainDestination
 }
