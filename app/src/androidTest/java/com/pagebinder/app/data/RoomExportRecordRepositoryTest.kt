@@ -6,6 +6,7 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.pagebinder.app.domain.ExportFailureCode
 import com.pagebinder.app.domain.ExportRecord
 import com.pagebinder.app.domain.ExportState
 import com.pagebinder.app.domain.ExportType
@@ -18,6 +19,7 @@ import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -156,6 +158,46 @@ class RoomExportRecordRepositoryTest {
 
             assertEquals(1, results.count { it })
             assertTrue(repository.findById(recordId) in candidates)
+        }
+
+    /**
+     * 取り残されたレコードの終端（docs/specs/11-export.md §3.2 末尾）を Room 上で確かめる。
+     * queued のまま取り残された場合も仕様の経路 queued → running → failed をたどって閉じ、
+     * 履歴レコードは消えずに残る（同 手順6 / 02-data-model §3.1）。
+     */
+    @Test
+    fun coordinatorClosesInterruptedQueuedRecordThroughSpecTransitions() =
+        runBlocking {
+            val coordinator = coordinator()
+            coordinator.enqueue(projectId, ExportType.MARKDOWN)
+
+            val closed = coordinator.markInterrupted(recordId)
+
+            assertEquals(ExportState.FAILED, closed?.state)
+            assertEquals(ExportFailureCode.INTERRUPTED, closed?.errorCode)
+            // 実行に入る前に落ちているので保存先は決まらないまま
+            assertNull(closed?.targetUri)
+            assertEquals(closed, repository.findById(recordId))
+            assertTrue(repository.findIncomplete().isEmpty())
+        }
+
+    /** running のまま取り残された場合は running → failed でそのまま閉じる（同 手順6） */
+    @Test
+    fun coordinatorClosesInterruptedRunningRecordAsFailed() =
+        runBlocking {
+            repository.insert(
+                record(
+                    state = ExportState.RUNNING,
+                    targetUri = "content://provider/document/redacted",
+                ),
+            )
+
+            val closed = coordinator().markInterrupted(recordId)
+
+            assertEquals(ExportState.FAILED, closed?.state)
+            assertEquals(ExportFailureCode.INTERRUPTED, closed?.errorCode)
+            assertEquals(closed, repository.findById(recordId))
+            assertTrue(repository.findIncomplete().isEmpty())
         }
 
     private fun coordinator() =

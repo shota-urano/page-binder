@@ -13,10 +13,33 @@ fun interface PdfImageSource {
     fun openInputStream(): InputStream
 }
 
+/**
+ * The non-destructive rotation and crop already baked into [PdfPage.image].
+ *
+ * [PdfPage.ocrBlocksJson] keeps original-image coordinates (02-data-model §3.4) while the image is
+ * the rotated/cropped derivative, so the PDF implementation needs the original size plus the edit
+ * to drive one shared transformation matrix (10-searchable-pdf §3.2). Rotation is clockwise and
+ * crop bounds are normalized against the rotated image (07-image-quality §3.4).
+ */
+data class PdfPageTransform(
+    val sourceWidth: Int,
+    val sourceHeight: Int,
+    val rotationDegrees: Int = 0,
+    val crop: PageCrop = PageCrop(),
+) {
+    init {
+        require(sourceWidth > 0 && sourceHeight > 0) { "PDF source dimensions must be positive" }
+        require(rotationDegrees in VALID_PAGE_ROTATIONS) {
+            "PDF page rotation must be 0, 90, 180, or 270 degrees"
+        }
+    }
+}
+
 /** Framework-independent input required by the eventual PDF implementation. */
 data class PdfPage(
     val sequence: Int,
     val image: PdfImageSource,
+    val transform: PdfPageTransform,
     val ocrBlocksJson: String?,
     val fullText: String?,
     val editedText: String?,

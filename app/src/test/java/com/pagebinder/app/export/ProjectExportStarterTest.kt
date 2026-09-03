@@ -26,7 +26,9 @@ import com.pagebinder.app.domain.PageRepository
 import com.pagebinder.app.domain.PdfGateway
 import com.pagebinder.app.domain.PdfInput
 import com.pagebinder.app.domain.PdfMode
+import com.pagebinder.app.domain.PdfPageTransform
 import com.pagebinder.app.domain.StoredOcrResult
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -85,7 +87,12 @@ class ProjectExportStarterTest {
             val starter =
                 starter(
                     pages = pages(),
-                    ocrResults = mapOf(pageIds[0] to ocr(pageIds[0], fullText = "one")),
+                    ocrResults =
+                        mapOf(
+                            pageIds[0] to ocr(pageIds[0], fullText = "one"),
+                            pageIds[1] to ocr(pageIds[1], fullText = "two"),
+                            pageIds[2] to ocr(pageIds[2], fullText = "three"),
+                        ),
                     pdfGateway = pdfGateway,
                 )
 
@@ -95,8 +102,20 @@ class ProjectExportStarterTest {
             assertEquals(listOf(1, 2, 3), pdfGateway.sequences)
             assertEquals(listOf("edited-1", "edited-2", "edited-3"), pdfGateway.imageContents)
             assertEquals("one", pdfGateway.fullTexts.first())
-            // 回転が入った3ページ目には元画像座標の blocksJson を渡さない
-            assertEquals(listOf("blocks-1", null, null), pdfGateway.blocksJson)
+            assertEquals(listOf("blocks-1", "blocks-2", "blocks-3"), pdfGateway.blocksJson)
+            assertEquals(
+                listOf(
+                    PdfPageTransform(sourceWidth = 100, sourceHeight = 200),
+                    PdfPageTransform(sourceWidth = 100, sourceHeight = 200),
+                    PdfPageTransform(
+                        sourceWidth = 100,
+                        sourceHeight = 200,
+                        rotationDegrees = 90,
+                        crop = PageCrop(left = 0.1f, top = 0.2f, right = 0.9f, bottom = 0.8f),
+                    ),
+                ),
+                pdfGateway.transforms,
+            )
         }
 
     @Test
@@ -175,7 +194,7 @@ class ProjectExportStarterTest {
             deletedAt = null,
         )
 
-    /** 3ページ目だけ回転済み（非破壊編集あり） */
+    /** 3ページ目だけ回転・切り取り済み（非破壊編集あり） */
     private fun pages(): List<Page> =
         pageIds.mapIndexed { index, pageId ->
             Page(
@@ -186,7 +205,7 @@ class ProjectExportStarterTest {
                 width = 100,
                 height = 200,
                 rotation = if (index == 2) 90 else 0,
-                crop = PageCrop(),
+                crop = if (index == 2) PageCrop(left = 0.1f, top = 0.2f, right = 0.9f, bottom = 0.8f) else PageCrop(),
                 capturedAt = CREATED_AT,
                 contentHash = "hash-${index + 1}",
                 perceptualHash = "phash-${index + 1}",
@@ -288,6 +307,8 @@ class ProjectExportStarterTest {
 
         override suspend fun findSummaryById(id: UUID): BookProjectSummary? = error("Not used by export")
 
+        override fun observeSummaryById(id: UUID): Flow<BookProjectSummary?> = error("Not used by export")
+
         override suspend fun update(
             id: UUID,
             title: String,
@@ -338,6 +359,8 @@ class ProjectExportStarterTest {
             private set
         var blocksJson: List<String?> = emptyList()
             private set
+        var transforms: List<PdfPageTransform> = emptyList()
+            private set
         var pdfQuality: ExportPdfQuality? = null
             private set
 
@@ -355,6 +378,7 @@ class ProjectExportStarterTest {
                 }
             fullTexts = input.pages.map { it.fullText }
             blocksJson = input.pages.map { it.ocrBlocksJson }
+            transforms = input.pages.map { it.transform }
             pdfQuality = input.pdfQuality
             output.write("pdf".toByteArray())
             reportProgress(input.pages.size, input.pages.size)

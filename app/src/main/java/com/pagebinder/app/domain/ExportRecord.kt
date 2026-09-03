@@ -48,3 +48,16 @@ interface ExportRecordRepository {
         updated: ExportRecord,
     ): Boolean
 }
+
+/**
+ * 前のプロセスが残した未完了の書き出し1件（docs/specs/11-export.md §3.2 末尾
+ * 「アプリ強制終了後、未完了の書き出しを検出して再試行できる」）。
+ *
+ * 「未完了」= [ExportRecord] が queued / running のまま終端（succeeded / failed）へ達していない状態
+ * （同 §3.2 手順6）。再試行の対象を指すために [recordId] を持つが、保存先URIは持たない
+ * （AGENTS.md ルール6: 保存URIをログにも UI にも出さない）。
+ */
+data class InterruptedExport(
+    val recordId: UUID,
+    val type: ExportType,
+)

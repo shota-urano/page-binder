@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -39,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,9 +53,19 @@ import com.pagebinder.app.ui.theme.ColorAccent
 import com.pagebinder.app.ui.theme.ColorDivider
 import com.pagebinder.app.ui.theme.ColorError
 import com.pagebinder.app.ui.theme.ColorTextSecondary
+import com.pagebinder.app.ui.theme.ColorWarning
 import com.pagebinder.app.ui.theme.MinTouchTarget
 import com.pagebinder.app.ui.theme.ScreenHorizontalMargin
 import com.pagebinder.app.ui.theme.SpaceUnit
+
+/**
+ * 統計の値だけを一意に指す印。ページ数・OCR完了・エラーは同じ数字が並ぶため、
+ * 「撮影でページが増えたときに統計が更新される」ことを UI テストから読むには印が要る。
+ */
+const val BOOK_DETAIL_PAGE_COUNT_TEST_TAG = "book-detail-page-count"
+const val BOOK_DETAIL_OCR_COMPLETED_TEST_TAG = "book-detail-ocr-completed"
+const val BOOK_DETAIL_OCR_ERROR_TEST_TAG = "book-detail-ocr-error"
+const val BOOK_DETAIL_STORAGE_TEST_TAG = "book-detail-storage"
 
 data class BookDetailActions(
     val onBack: () -> Unit,
@@ -67,6 +80,8 @@ data class BookDetailActions(
     val onMoveToTrashConfirmed: () -> Unit,
     val onMoveToTrashDismissed: () -> Unit,
     val onReload: () -> Unit,
+    /** 未完了の書き出しの「再試行」（docs/specs/11-export.md §3.2） */
+    val onRetryInterruptedExport: () -> Unit,
     val manualCaptureAvailable: Boolean = true,
     val continuousCaptureAvailable: Boolean = true,
     val exportAvailable: Boolean = true,
@@ -97,6 +112,12 @@ fun BookDetailScreen(
                             .padding(horizontal = ScreenHorizontalMargin),
                     verticalArrangement = Arrangement.spacedBy(SpaceUnit * 2),
                 ) {
+                    uiState.interruptedExport?.let { interrupted ->
+                        InterruptedExportBanner(
+                            count = interrupted.count,
+                            onRetry = actions.onRetryInterruptedExport,
+                        )
+                    }
                     InfoCard(uiState)
                     StatisticsCard(uiState)
                     Row(horizontalArrangement = Arrangement.spacedBy(SpaceUnit)) {
@@ -245,7 +266,12 @@ private fun StatisticsCard(uiState: BookDetailUiState) {
     ) {
         Column(Modifier.padding(SpaceUnit * 2)) {
             Row(modifier = Modifier.height(IntrinsicSize.Min)) {
-                Statistic(R.string.book_detail_page_count, uiState.pageCount.toString(), Modifier.weight(1f))
+                Statistic(
+                    R.string.book_detail_page_count,
+                    uiState.pageCount.toString(),
+                    Modifier.weight(1f),
+                    valueTestTag = BOOK_DETAIL_PAGE_COUNT_TEST_TAG,
+                )
                 VerticalDivider(modifier = Modifier.fillMaxHeight(), color = ColorDivider)
                 Statistic(
                     R.string.book_detail_ocr_completed,
@@ -253,6 +279,7 @@ private fun StatisticsCard(uiState: BookDetailUiState) {
                     Modifier.weight(1f),
                     ColorAccent,
                     showCheck = true,
+                    valueTestTag = BOOK_DETAIL_OCR_COMPLETED_TEST_TAG,
                 )
             }
             HorizontalDivider(Modifier.padding(vertical = SpaceUnit), color = ColorDivider)
@@ -262,12 +289,14 @@ private fun StatisticsCard(uiState: BookDetailUiState) {
                     uiState.ocrErrorCount.toString(),
                     Modifier.weight(1f),
                     if (uiState.ocrErrorCount > 0) ColorError else MaterialTheme.colorScheme.onSurface,
+                    valueTestTag = BOOK_DETAIL_OCR_ERROR_TEST_TAG,
                 )
                 VerticalDivider(modifier = Modifier.fillMaxHeight(), color = ColorDivider)
                 Statistic(
                     R.string.book_detail_storage,
                     formatStorageBytes(uiState.storageBytes),
                     Modifier.weight(1f),
+                    valueTestTag = BOOK_DETAIL_STORAGE_TEST_TAG,
                 )
             }
         }
@@ -281,12 +310,18 @@ private fun Statistic(
     modifier: Modifier,
     valueColor: Color = MaterialTheme.colorScheme.onSurface,
     showCheck: Boolean = false,
+    valueTestTag: String? = null,
 ) {
     Column(modifier.padding(horizontal = SpaceUnit)) {
         Text(stringResource(labelRes), style = MaterialTheme.typography.bodyMedium, color = ColorTextSecondary)
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (showCheck) Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = ColorAccent)
-            Text(value, style = MaterialTheme.typography.headlineSmall, color = valueColor)
+            Text(
+                value,
+                modifier = if (valueTestTag == null) Modifier else Modifier.testTag(valueTestTag),
+                style = MaterialTheme.typography.headlineSmall,
+                color = valueColor,
+            )
         }
     }
 }
@@ -314,9 +349,56 @@ private fun DetailAction(
     if (divider) HorizontalDivider(color = ColorDivider)
 }
 
+/**
+ * 未完了の書き出しの提示（docs/specs/11-export.md §3.2 末尾）。
+ *
+ * この提示 UI はデザイン素材（docs/design/03-book-detail.md）に定義が無いため、
+ * 書き出し画面の警告バナー（docs/design/11-export.md「警告バナー」）と同じ
+ * 「⚠ + 文言 + 右端アクション」を warning の薄地で置く。新しい見た目は作らない。
+ */
+@Composable
+private fun InterruptedExportBanner(
+    count: Int,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(CardCornerRadius),
+        color = ColorWarning.copy(alpha = WARNING_SURFACE_ALPHA),
+    ) {
+        Row(
+            modifier =
+                Modifier
+                    .heightIn(min = MinTouchTarget)
+                    .padding(horizontal = ScreenHorizontalMargin, vertical = SpaceUnit),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(imageVector = Icons.Filled.Warning, contentDescription = null, tint = ColorWarning)
+            Spacer(Modifier.width(SpaceUnit * 1.5f))
+            Text(
+                text = stringResource(R.string.book_detail_interrupted_export, count),
+                style = MaterialTheme.typography.bodyMedium,
+                color = ColorWarning,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = MinTouchTarget)) {
+                Text(
+                    text = stringResource(R.string.book_detail_interrupted_export_action),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = ColorWarning,
+                )
+            }
+        }
+    }
+}
+
 private fun BookDetailOperationError.messageRes(): Int =
     when (this) {
         BookDetailOperationError.LOAD -> R.string.book_detail_load_failed
         BookDetailOperationError.MOVE_TO_TRASH -> R.string.book_detail_trash_failed
         BookDetailOperationError.OCR_BATCH -> R.string.book_detail_ocr_failed
     }
+
+/** 警告バナーの薄地。トークンに warning-container が無いため不透明度で作る（書き出し画面と同値） */
+private const val WARNING_SURFACE_ALPHA = 0.12f

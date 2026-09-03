@@ -66,6 +66,10 @@
     <string name="book_detail_trash_failed">書籍をごみ箱に移動できませんでした</string>
     <string name="book_detail_ocr_failed">OCRを予約できませんでした</string>
     <string name="book_detail_ocr_queued">%1$d件のOCRを予約しました</string>
+    <!-- 未完了の書き出しの提示と再試行（docs/specs/11-export.md §3.2「アプリ強制終了後、未完了の書き出しを検出して再試行できる」）。
+         提示UIはデザイン素材に無いため、書き出し画面の警告バナー（export_ocr_warning）の言い回しに揃えた -->
+    <string name="book_detail_interrupted_export">完了していない書き出しが%1$d件あります</string>
+    <string name="book_detail_interrupted_export_action">再試行</string>
 
     <!-- 撮影準備画面（docs/design/05-capture-prep.md / docs/specs/04-capture-session.md §3.2） -->
     <string name="capture_prep_title">撮影の準備</string>

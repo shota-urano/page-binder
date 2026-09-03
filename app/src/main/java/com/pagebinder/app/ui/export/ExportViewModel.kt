@@ -14,6 +14,7 @@ import com.pagebinder.app.domain.ExportProgressPhase
 import com.pagebinder.app.domain.ExportProjectSummary
 import com.pagebinder.app.domain.ExportStarter
 import com.pagebinder.app.domain.ExportType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,6 +42,20 @@ import java.util.UUID
 class ExportViewModel(
     project: ExportProjectSummary,
     private val exportStarter: ExportStarter,
+    /**
+     * 最初に選ばれている出力形式。未完了の書き出しの再試行（docs/specs/11-export.md §3.2 末尾）で
+     * 前回と同じ形式から始めるために書籍詳細が渡す。通常の書き出しは既定のまま。
+     */
+    initialFormat: ExportType = ExportType.SEARCHABLE_PDF,
+    /**
+     * 未完了の書き出しの再試行として開かれたときだけ渡る、取り残されたレコードの終端化
+     * （docs/specs/11-export.md §3.2 手順6。何をするかは ExportRecordCoordinator.markInterrupted）。
+     *
+     * 呼ぶのは書き出しが**成功した**ときだけ。手順5の「完了で確定する」を満たして初めて
+     * 取り残しが解消したとみなす（FR-EXP-007）。戻る・SAF を閉じる・失敗した場合は呼ばないので、
+     * 書籍詳細の提示は残り、もう一度再試行できる。
+     */
+    private val resolveInterruptedExport: (suspend () -> Unit)? = null,
 ) : ViewModel() {
     private val projectId: UUID = project.projectId
 
@@ -48,6 +63,7 @@ class ExportViewModel(
         MutableStateFlow(
             ExportUiState(
                 pageCount = project.pageCount,
+                format = initialFormat,
                 fileName = project.title,
                 ocrIncompletePageCount = project.ocrIncompletePageCount,
             ),
@@ -214,6 +230,7 @@ class ExportViewModel(
     }
 
     private fun onExportEvent(event: ExportProgressEvent) {
+        if (event is ExportProgressEvent.Succeeded) onRetriedExportSucceeded()
         mutableUiState.update { current ->
             when (event) {
                 is ExportProgressEvent.Progress ->
@@ -235,13 +252,35 @@ class ExportViewModel(
         }
     }
 
+    /**
+     * 再試行の書き出しが成功したので、取り残されていたレコードを閉じる。
+     * 失敗しても画面は成功のまま（成果物は確定している）。次に書籍詳細を開いたときの
+     * 検出でまだ未完了なら提示が出るので、利用者は再試行し直せる。
+     */
+    private fun onRetriedExportSucceeded() {
+        val resolve = resolveInterruptedExport ?: return
+        viewModelScope.launch {
+            try {
+                resolve()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // 例外の内容はログへ出さない（保存URIが混ざりうる — AGENTS.md ルール6）
+            }
+        }
+    }
+
     companion object {
         fun factory(
             project: ExportProjectSummary,
             exportStarter: ExportStarter,
+            initialFormat: ExportType = ExportType.SEARCHABLE_PDF,
+            resolveInterruptedExport: (suspend () -> Unit)? = null,
         ): ViewModelProvider.Factory =
             viewModelFactory {
-                initializer { ExportViewModel(project, exportStarter) }
+                initializer {
+                    ExportViewModel(project, exportStarter, initialFormat, resolveInterruptedExport)
+                }
             }
     }
 }

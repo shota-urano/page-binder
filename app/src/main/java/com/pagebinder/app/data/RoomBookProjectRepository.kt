@@ -12,6 +12,12 @@ import com.pagebinder.app.domain.BookProjectRepositoryException
 import com.pagebinder.app.domain.BookProjectSort
 import com.pagebinder.app.domain.BookProjectSummary
 import com.pagebinder.app.storage.ProjectFileStore
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import java.text.Normalizer
 import java.time.Duration
 import java.time.Instant
@@ -75,6 +81,24 @@ abstract class BookProjectDao {
         """,
     )
     abstract suspend fun findSummaryById(id: String): BookProjectAggregateEntity?
+
+    /**
+     * [findSummaryById] と同じ集計を購読する。`book_projects` と `pages` を読むので、
+     * ページの追加・削除・OCR状態の更新で Room が再クエリして現在値を流し直す。
+     */
+    @Query(
+        """
+        SELECT book_projects.*,
+               COALESCE(SUM(CASE WHEN pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS pageCount,
+               COALESCE(SUM(CASE WHEN pages.ocr_state = 'succeeded' THEN 1 ELSE 0 END), 0) AS ocrCompletedCount,
+               COALESCE(SUM(CASE WHEN pages.ocr_state = 'failed' AND pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS ocrErrorCount
+        FROM book_projects
+        LEFT JOIN pages ON pages.project_id = book_projects.id
+        WHERE book_projects.id = :id
+        GROUP BY book_projects.id
+        """,
+    )
+    abstract fun observeSummaryById(id: String): Flow<BookProjectAggregateEntity?>
 
     @Query(
         """
@@ -147,6 +171,7 @@ class RoomBookProjectRepository(
     private val fileStore: ProjectFileStore,
     private val now: () -> Instant = Instant::now,
     private val newId: () -> UUID = UUID::randomUUID,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : BookProjectRepository {
     override suspend fun create(
         title: String,
@@ -191,6 +216,15 @@ class RoomBookProjectRepository(
 
     override suspend fun findSummaryById(id: UUID): BookProjectSummary? =
         dao.findSummaryById(id.toString())?.toSummary()
+
+    // 使用容量はファイル領域の実測（[ProjectFileStore.sizeBytes]）なので、集計と同じ購読の中で
+    // 数え直す。ページ画像は DB 登録より先に書かれるため、再クエリ時点の容量は常に最新になる。
+    override fun observeSummaryById(id: UUID): Flow<BookProjectSummary?> =
+        dao
+            .observeSummaryById(id.toString())
+            .map { it?.toSummary() }
+            .distinctUntilChanged()
+            .flowOn(ioDispatcher)
 
     override suspend fun update(
         id: UUID,

@@ -9,6 +9,7 @@ import com.pagebinder.app.domain.PdfImageSource
 import com.pagebinder.app.domain.PdfInput
 import com.pagebinder.app.domain.PdfMode
 import com.pagebinder.app.domain.PdfPage
+import com.pagebinder.app.domain.PdfPageTransform
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.text.PDFTextStripper
@@ -77,7 +78,19 @@ class PdfBoxPdfGatewayTest {
                 ExportPdfQuality.entries.associateWith { quality ->
                     val output = ByteArrayOutputStream()
                     gateway.generate(
-                        input = PdfInput(listOf(page(1, null, image = largeImageBytes)), quality),
+                        input =
+                            PdfInput(
+                                listOf(
+                                    page(
+                                        sequence = 1,
+                                        blocksJson = null,
+                                        image = largeImageBytes,
+                                        sourceWidth = QUALITY_IMAGE_WIDTH,
+                                        sourceHeight = QUALITY_IMAGE_HEIGHT,
+                                    ),
+                                ),
+                                quality,
+                            ),
                         mode = PdfMode.IMAGE_ONLY,
                         output = output,
                     ) { _, _ -> }
@@ -149,10 +162,13 @@ class PdfBoxPdfGatewayTest {
         fullText: String? = null,
         editedText: String? = null,
         image: ByteArray = imageBytes,
+        sourceWidth: Int = IMAGE_WIDTH,
+        sourceHeight: Int = IMAGE_HEIGHT,
     ): PdfPage =
         PdfPage(
             sequence = sequence,
             image = PdfImageSource { ByteArrayInputStream(image) },
+            transform = PdfPageTransform(sourceWidth = sourceWidth, sourceHeight = sourceHeight),
             ocrBlocksJson = blocksJson,
             fullText = fullText,
             editedText = editedText,
