@@ -5,6 +5,7 @@ import com.pagebinder.app.domain.BookProjectRepository
 import com.pagebinder.app.domain.BookProjectSort
 import com.pagebinder.app.domain.BookProjectSummary
 import com.pagebinder.app.domain.ExportType
+import com.pagebinder.app.domain.InterruptedExport
 import com.pagebinder.app.domain.Page
 import com.pagebinder.app.domain.PageCrop
 import com.pagebinder.app.domain.PageOcrState
@@ -244,10 +245,18 @@ class BookDetailViewModelTest : BookProjectViewModelTestBase() {
             assertFalse(viewModel.uiState.value.operationInProgress)
         }
 
+    /**
+     * 未完了の提示はレコードの実状態に従う（docs/specs/11-export.md §3.2 末尾）。
+     * 「再試行を押した」ことでは消えない — 書き出し画面から戻る・SAF を閉じるだけなら
+     * レコードは queued / running のまま残っており、再試行の導線を失わせてはならない。
+     */
     @Test
-    fun `interrupted exports are detected once and cleared by the retry`() =
+    fun `未完了の提示は再試行では消えずレコードが残る限り出続ける`() =
         runTest {
             val summary = summary(title = "Detail", pageCount = 3)
+            val markdown = InterruptedExport(UUID.randomUUID(), ExportType.MARKDOWN)
+            val imageZip = InterruptedExport(UUID.randomUUID(), ExportType.IMAGE_ZIP)
+            val incomplete = mutableListOf(markdown, imageZip)
             var detectCalls = 0
             val viewModel =
                 BookDetailViewModel(
@@ -256,12 +265,13 @@ class BookDetailViewModelTest : BookProjectViewModelTestBase() {
                     enqueueProjectOcr = { 0 },
                     findInterruptedExports = {
                         detectCalls++
-                        listOf(ExportType.MARKDOWN, ExportType.IMAGE_ZIP)
+                        incomplete.toList()
                     },
                 )
 
-            // 書籍詳細を開いた時点で検出が走り、最も古い未完了の形式が提示される
+            // 書籍詳細を開いた時点で検出が走り、最も古い未完了が再試行対象になる
             assertEquals(1, detectCalls)
+            assertEquals(markdown.recordId, viewModel.uiState.value.interruptedExport?.recordId)
             assertEquals(ExportType.MARKDOWN, viewModel.uiState.value.interruptedExport?.format)
             assertEquals(2, viewModel.uiState.value.interruptedExport?.count)
 
@@ -269,12 +279,43 @@ class BookDetailViewModelTest : BookProjectViewModelTestBase() {
             viewModel.onOcrBatchRequested()
             assertNotNull(viewModel.uiState.value.interruptedExport)
 
-            viewModel.onInterruptedExportRetried()
-            assertNull(viewModel.uiState.value.interruptedExport)
-
-            // 再読み込みでは検出し直さない（再試行しても前回のレコードは未完了のまま残るため）
+            // 再試行 → 書き出し画面から戻る（レコードは未完了のまま）。提示は同じ対象で出続ける
             viewModel.load()
-            assertEquals(1, detectCalls)
+            assertEquals(2, detectCalls)
+            assertEquals(markdown.recordId, viewModel.uiState.value.interruptedExport?.recordId)
+            assertEquals(2, viewModel.uiState.value.interruptedExport?.count)
+        }
+
+    /** 複数件は古い順に1件ずつ。1件解消しても残りの提示と再試行は失われない */
+    @Test
+    fun `未完了が複数あるとき1件解消すると残りが提示される`() =
+        runTest {
+            val summary = summary(title = "Detail", pageCount = 3)
+            val markdown = InterruptedExport(UUID.randomUUID(), ExportType.MARKDOWN)
+            val imageZip = InterruptedExport(UUID.randomUUID(), ExportType.IMAGE_ZIP)
+            val incomplete = mutableListOf(markdown, imageZip)
+            val viewModel =
+                BookDetailViewModel(
+                    projectId = summary.project.id,
+                    repository = FakeBookProjectRepository(active = mutableListOf(summary)),
+                    enqueueProjectOcr = { 0 },
+                    findInterruptedExports = { incomplete.toList() },
+                )
+
+            assertEquals(2, viewModel.uiState.value.interruptedExport?.count)
+
+            // 再試行が成功して最も古いレコードが終端した（検出から外れる）
+            incomplete.remove(markdown)
+            viewModel.load()
+
+            assertEquals(imageZip.recordId, viewModel.uiState.value.interruptedExport?.recordId)
+            assertEquals(ExportType.IMAGE_ZIP, viewModel.uiState.value.interruptedExport?.format)
+            assertEquals(1, viewModel.uiState.value.interruptedExport?.count)
+
+            // 残り1件も解消したら提示が消える
+            incomplete.remove(imageZip)
+            viewModel.load()
+
             assertNull(viewModel.uiState.value.interruptedExport)
         }
 

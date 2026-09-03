@@ -214,6 +214,7 @@ class BookDetailStatisticsUpdateTest {
                     enqueueProjectOcr = { 0 },
                     // 未完了の書き出しの提示はこのテストの対象外（PageBinderAppNavigationTest で見る）
                     findInterruptedExports = { emptyList() },
+                    resolveInterruptedExport = {},
                     autoCaptureSettingsRepository = FakeAutoCaptureSettingsRepository(),
                     captureFeedbackSettingsRepository = FakeCaptureFeedbackSettingsRepository(),
                     // 撮影の開始（MediaProjection）は OS の許可が要るのでここでは行わない

@@ -1,5 +1,6 @@
 package com.pagebinder.app.export
 
+import com.pagebinder.app.domain.ExportFailureCode
 import com.pagebinder.app.domain.ExportRecord
 import com.pagebinder.app.domain.ExportRecordRepository
 import com.pagebinder.app.domain.ExportState
@@ -65,6 +66,30 @@ class ExportRecordCoordinator(
                 errorCode = errorCode,
             )
         }
+    }
+
+    /**
+     * プロセス終了で queued / running のまま取り残されたレコードを終端させる
+     * （docs/specs/11-export.md §3.2 手順6「queued → running → succeeded / failed を記録する」を閉じる）。
+     *
+     * 呼ぶのは再試行の書き出しが成功したときだけ。取り残された方は完了で確定していない
+     * （同 手順5 / FR-EXP-007: 不完全ファイルを成功扱いしない）ので failed + `interrupted` で閉じる。
+     * すでに終端しているレコードはそのまま返すので、多重に呼ばれても壊れない。
+     */
+    suspend fun markInterrupted(id: UUID): ExportRecord {
+        val current = repository.findById(id) ?: throw ExportRecordNotFoundException(id)
+        if (current.state != ExportState.QUEUED && current.state != ExportState.RUNNING) return current
+
+        val updated =
+            current.copy(
+                state = ExportState.FAILED,
+                completedAt = Instant.now(clock),
+                errorCode = ExportFailureCode.INTERRUPTED,
+            )
+        if (!repository.compareAndSet(current, updated)) {
+            throw ConcurrentExportRecordUpdateException(id)
+        }
+        return updated
     }
 
     private suspend fun transition(

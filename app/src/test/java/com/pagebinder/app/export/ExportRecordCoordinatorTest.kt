@@ -1,5 +1,6 @@
 package com.pagebinder.app.export
 
+import com.pagebinder.app.domain.ExportFailureCode
 import com.pagebinder.app.domain.ExportRecord
 import com.pagebinder.app.domain.ExportRecordRepository
 import com.pagebinder.app.domain.ExportState
@@ -55,6 +56,52 @@ class ExportRecordCoordinatorTest {
             assertEquals(now, failed.completedAt)
             assertEquals("write_failed", failed.errorCode)
             assertEquals(failed, repository.findById(recordId))
+        }
+
+    /**
+     * プロセス終了で取り残された queued / running を終端させる（docs/specs/11-export.md §3.2 手順6）。
+     * これで InterruptedExportDetector の検出から外れ、書籍詳細の提示が消える。
+     */
+    @Test
+    fun `interrupted records are closed as failed from queued and running`() =
+        runBlocking {
+            val queuedRepository = AtomicInMemoryExportRecordRepository()
+            val fromQueued =
+                coordinator(queuedRepository).let { coordinator ->
+                    coordinator.enqueue(projectId, ExportType.MARKDOWN)
+                    coordinator.markInterrupted(recordId)
+                }
+
+            assertEquals(ExportState.FAILED, fromQueued.state)
+            assertEquals(now, fromQueued.completedAt)
+            assertEquals(ExportFailureCode.INTERRUPTED, fromQueued.errorCode)
+            assertTrue(queuedRepository.findIncomplete().isEmpty())
+
+            val runningRepository = AtomicInMemoryExportRecordRepository()
+            val fromRunning =
+                coordinator(runningRepository).let { coordinator ->
+                    coordinator.enqueue(projectId, ExportType.MARKDOWN)
+                    coordinator.markRunning(recordId, "content://provider/document/redacted")
+                    coordinator.markInterrupted(recordId)
+                }
+
+            assertEquals(ExportState.FAILED, fromRunning.state)
+            assertEquals(ExportFailureCode.INTERRUPTED, fromRunning.errorCode)
+            assertTrue(runningRepository.findIncomplete().isEmpty())
+        }
+
+    /** 終端済みのレコードは書き換えない（再試行が二重に走っても壊れない） */
+    @Test
+    fun `interrupted marking leaves a terminal record untouched`() =
+        runBlocking {
+            val repository = AtomicInMemoryExportRecordRepository()
+            val coordinator = coordinator(repository)
+            coordinator.enqueue(projectId, ExportType.MARKDOWN)
+            coordinator.markRunning(recordId, "content://provider/document/redacted")
+            val succeeded = coordinator.markSucceeded(recordId)
+
+            assertEquals(succeeded, coordinator.markInterrupted(recordId))
+            assertEquals(succeeded, repository.findById(recordId))
         }
 
     @Test

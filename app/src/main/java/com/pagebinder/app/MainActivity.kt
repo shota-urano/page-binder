@@ -48,6 +48,7 @@ private fun PageBinderRoot() {
         exportStarter = application.exportStarter,
         enqueueProjectOcr = application.ocrQueue::enqueueProject,
         findInterruptedExports = application::findInterruptedExports,
+        resolveInterruptedExport = application::resolveInterruptedExport,
         autoCaptureSettingsRepository = application.autoCaptureSettingsRepository,
         captureFeedbackSettingsRepository = application.captureFeedbackSettingsRepository,
         startCapture = { projectId, request ->

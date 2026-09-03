@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.pagebinder.app.domain.BookProjectRepository
 import com.pagebinder.app.domain.BookProjectSummary
 import com.pagebinder.app.domain.ExportType
+import com.pagebinder.app.domain.InterruptedExport
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,9 +29,12 @@ data class MoveToTrashConfirmationUiState(
  * 前回のプロセスが残した未完了の書き出しの提示（docs/specs/11-export.md §3.2 末尾
  * 「アプリ強制終了後、未完了の書き出しを検出して再試行できる」）。
  *
- * [format] は再試行で選び直させる出力形式（最も古い未完了レコードのもの）、[count] は検出件数。
+ * [recordId] と [format] は再試行の対象になる最も古い未完了レコード、[count] は残っている件数。
+ * 未完了レコードが複数あるときは古い順に1件ずつ再試行するので、1件解消するたびに [count] が減り、
+ * 次のレコードが再試行対象になる。
  */
 data class InterruptedExportUiState(
+    val recordId: UUID,
     val format: ExportType,
     val count: Int,
 )
@@ -65,48 +69,59 @@ class BookDetailViewModel(
     private val projectId: UUID,
     private val repository: BookProjectRepository,
     private val enqueueProjectOcr: suspend (UUID) -> Int,
-    private val findInterruptedExports: suspend (UUID) -> List<ExportType>,
+    private val findInterruptedExports: suspend (UUID) -> List<InterruptedExport>,
 ) : ViewModel() {
     private val mutableUiState = MutableStateFlow(BookDetailUiState())
     val uiState: StateFlow<BookDetailUiState> = mutableUiState.asStateFlow()
     private var summaryJob: Job? = null
+    private var interruptedExportJob: Job? = null
 
     /** ごみ箱へ移動した直後の「書籍が消えた」通知を、読み込み失敗と取り違えないための印。 */
     private var movingToTrash = false
 
     init {
         load()
-        detectInterruptedExports()
     }
 
     /**
-     * 未完了の書き出しを検出して提示する（docs/specs/11-export.md §3.2）。
+     * 未完了の書き出しを検出して提示する（docs/specs/11-export.md §3.2 末尾）。
      *
-     * 検出は ViewModel 1インスタンスにつき1回（= 書籍詳細を最初に開いたとき）だけ行う。
-     * 再試行は保存先を選び直す新しい書き出しなので、前回の未完了レコード自体は残る。
-     * [load] のたびに検出し直すと同じ提示が消えなくなるため、ここでは1回だけ拾う。
+     * 書籍詳細を開くたび（[load] のたび）に検出し直し、提示は毎回その結果に置き換える。
+     * 提示を消してよいのは未完了レコードが実際に解消されたときだけで、「再試行を押した」ことでは
+     * 消さない — 書き出し画面から戻る・SAF を閉じるだけならレコードは queued / running のまま
+     * 残っており、再試行の導線を失わせてはならない。
+     * レコードが終端（succeeded / failed）へ達すると検出から外れ、この代入で提示が消える。
      */
     private fun detectInterruptedExports() {
-        viewModelScope.launch {
-            val formats =
-                try {
-                    findInterruptedExports(projectId)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    // 例外の内容はログへ出さない（保存URIが混ざりうる — AGENTS.md ルール6）
-                    emptyList()
+        // 開き直しが重なっても、古い検出結果が新しい提示を上書きしないように1本だけ走らせる
+        interruptedExportJob?.cancel()
+        interruptedExportJob =
+            viewModelScope.launch {
+                val interrupted =
+                    try {
+                        findInterruptedExports(projectId)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // 例外の内容はログへ出さない（保存URIが混ざりうる — AGENTS.md ルール6）
+                        // 検出できなかったときは前回の提示をそのまま残す（勝手に消さない）
+                        return@launch
+                    }
+                // 再試行は古い順に1件ずつ。先頭が今回の対象で、count は残っている件数
+                val oldest = interrupted.firstOrNull()
+                mutableUiState.update { state ->
+                    state.copy(
+                        interruptedExport =
+                            oldest?.let {
+                                InterruptedExportUiState(
+                                    recordId = it.recordId,
+                                    format = it.type,
+                                    count = interrupted.size,
+                                )
+                            },
+                    )
                 }
-            val format = formats.firstOrNull() ?: return@launch
-            mutableUiState.update {
-                it.copy(interruptedExport = InterruptedExportUiState(format, formats.size))
             }
-        }
-    }
-
-    /** 再試行を選んだ。提示を閉じ、書き出し画面へ入り直すのは呼び出し側（導線）の役目 */
-    fun onInterruptedExportRetried() {
-        mutableUiState.update { it.copy(interruptedExport = null) }
     }
 
     /**
@@ -118,6 +133,7 @@ class BookDetailViewModel(
     fun load() {
         summaryJob?.cancel()
         mutableUiState.update { it.copy(loading = true, operationError = null) }
+        detectInterruptedExports()
         summaryJob =
             viewModelScope.launch {
                 repository
@@ -209,7 +225,7 @@ class BookDetailViewModel(
             projectId: UUID,
             repository: BookProjectRepository,
             enqueueProjectOcr: suspend (UUID) -> Int,
-            findInterruptedExports: suspend (UUID) -> List<ExportType>,
+            findInterruptedExports: suspend (UUID) -> List<InterruptedExport>,
         ): ViewModelProvider.Factory =
             viewModelFactory {
                 initializer {

@@ -17,15 +17,15 @@ import com.pagebinder.app.domain.CaptureSessionLifecycle
 import com.pagebinder.app.domain.CaptureStopReason
 import com.pagebinder.app.domain.ExportRecordRepository
 import com.pagebinder.app.domain.ExportStarter
-import com.pagebinder.app.domain.ExportType
+import com.pagebinder.app.domain.InterruptedExport
 import com.pagebinder.app.domain.OcrImageSource
 import com.pagebinder.app.domain.OcrJobRepository
 import com.pagebinder.app.domain.OcrJobRunner
 import com.pagebinder.app.domain.OcrQueue
 import com.pagebinder.app.domain.OcrQueueScheduler
 import com.pagebinder.app.domain.PageRepository
+import com.pagebinder.app.export.ExportRecordCoordinator
 import com.pagebinder.app.export.InterruptedExportDetector
-import com.pagebinder.app.export.RetryableExport
 import com.pagebinder.app.image.FilePageThumbnailLoader
 import com.pagebinder.app.ocr.AndroidOcrExecutionPolicy
 import com.pagebinder.app.ocr.MlKitOcrGateway
@@ -59,6 +59,7 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
     @Inject lateinit var exportRecordRepository: ExportRecordRepository
 
     private val interruptedExportDetector by lazy { InterruptedExportDetector(exportRecordRepository) }
+    private val exportRecordCoordinator by lazy { ExportRecordCoordinator(exportRecordRepository) }
 
     val pageThumbnailLoader by lazy { FilePageThumbnailLoader(imageStore, pageRepository) }
     val ocrQueueScheduler by lazy { createOcrQueueScheduler() }
@@ -158,16 +159,25 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
     }
 
     /**
-     * 前回のプロセスが残した未完了の書き出しの出力形式を、書籍プロジェクト単位で返す
+     * 前回のプロセスが残した未完了の書き出しを、書籍プロジェクト単位で古い順に返す
      * （docs/specs/11-export.md §3.2 末尾「アプリ強制終了後、未完了の書き出しを検出して再試行できる」）。
      *
-     * 書籍詳細画面が開かれたときに呼ばれる。保存URIは画面へ渡さない（AGENTS.md ルール6）。
+     * 書籍詳細画面を開くたびに呼ばれる。提示は毎回この検出結果に従うので、レコードが
+     * 残っている限り提示も残る。保存URIは画面へ渡さない（AGENTS.md ルール6）。
      */
-    suspend fun findInterruptedExports(projectId: UUID): List<ExportType> =
+    suspend fun findInterruptedExports(projectId: UUID): List<InterruptedExport> =
         interruptedExportDetector
             .detect()
             .filter { it.projectId == projectId }
-            .map(RetryableExport::type)
+            .map { InterruptedExport(recordId = it.recordId, type = it.type) }
+
+    /**
+     * 再試行の書き出しが成功したので、取り残されていたレコードを終端させる（同 §3.2 手順6）。
+     * これで次に書籍詳細を開いたときの検出から外れ、提示が消える。
+     */
+    suspend fun resolveInterruptedExport(recordId: UUID) {
+        exportRecordCoordinator.markInterrupted(recordId)
+    }
 
     override fun onCreate() {
         super.onCreate()

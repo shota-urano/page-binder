@@ -21,6 +21,7 @@ import com.pagebinder.app.domain.CaptureFeedbackSettingsRepository
 import com.pagebinder.app.domain.ExportProjectSummary
 import com.pagebinder.app.domain.ExportStarter
 import com.pagebinder.app.domain.ExportType
+import com.pagebinder.app.domain.InterruptedExport
 import com.pagebinder.app.domain.PageRepository
 import com.pagebinder.app.ui.bookdetail.BookDetailActions
 import com.pagebinder.app.ui.bookdetail.BookDetailScreen
@@ -65,10 +66,12 @@ fun PageBinderApp(
     exportStarter: ExportStarter,
     enqueueProjectOcr: suspend (UUID) -> Int,
     /**
-     * 前回のプロセスが残した未完了の書き出しの出力形式を、書籍プロジェクト単位で返す
+     * 前回のプロセスが残した未完了の書き出しを、書籍プロジェクト単位で古い順に返す
      * （docs/specs/11-export.md §3.2 末尾。実装は `export/` の InterruptedExportDetector）。
      */
-    findInterruptedExports: suspend (UUID) -> List<ExportType>,
+    findInterruptedExports: suspend (UUID) -> List<InterruptedExport>,
+    /** 再試行の書き出しが成功したときに、取り残されていたレコードを終端させる（同 §3.2 手順6） */
+    resolveInterruptedExport: suspend (UUID) -> Unit,
     autoCaptureSettingsRepository: AutoCaptureSettingsRepository,
     captureFeedbackSettingsRepository: CaptureFeedbackSettingsRepository,
     startCapture: (UUID, AuthorizedCaptureRequest) -> Unit,
@@ -91,6 +94,7 @@ fun PageBinderApp(
                     exportStarter = exportStarter,
                     enqueueProjectOcr = enqueueProjectOcr,
                     findInterruptedExports = findInterruptedExports,
+                    resolveInterruptedExport = resolveInterruptedExport,
                     autoCaptureSettingsRepository = autoCaptureSettingsRepository,
                     captureFeedbackSettingsRepository = captureFeedbackSettingsRepository,
                     startCapture = startCapture,
@@ -112,7 +116,8 @@ private fun PageBinderMain(
     pageThumbnailLoader: PageThumbnailLoader,
     exportStarter: ExportStarter,
     enqueueProjectOcr: suspend (UUID) -> Int,
-    findInterruptedExports: suspend (UUID) -> List<ExportType>,
+    findInterruptedExports: suspend (UUID) -> List<InterruptedExport>,
+    resolveInterruptedExport: suspend (UUID) -> Unit,
     autoCaptureSettingsRepository: AutoCaptureSettingsRepository,
     captureFeedbackSettingsRepository: CaptureFeedbackSettingsRepository,
     startCapture: (UUID, AuthorizedCaptureRequest) -> Unit,
@@ -242,14 +247,16 @@ private fun PageBinderMain(
                         onReload = detailViewModel::load,
                         // 未完了の書き出しの再試行。保存先は選び直す必要があるので
                         // （SAF の書き込み先URIは持ち越さない — docs/specs/11-export.md §3.2 手順4）、
-                        // 前回と同じ出力形式を選んだ状態で書き出し画面へ入り直す
+                        // 前回と同じ出力形式を選んだ状態で書き出し画面へ入り直す。
+                        // 提示はここでは消さない。戻る・SAF を閉じるだけならレコードは未完了のまま
+                        // 残っており、書籍詳細へ戻った時点の再検出でまた提示される
                         onRetryInterruptedExport = {
                             detailState.interruptedExport?.let { interrupted ->
-                                detailViewModel.onInterruptedExportRetried()
                                 destination =
                                     MainDestination.Export(
                                         project = exportSummary(),
                                         initialFormat = interrupted.format,
+                                        interruptedRecordId = interrupted.recordId,
                                     )
                             }
                         },
@@ -323,9 +330,14 @@ private fun PageBinderMain(
                     key = "export-${current.instanceId}",
                     factory =
                         ExportViewModel.factory(
-                            current.project,
-                            exportStarter,
-                            current.initialFormat,
+                            project = current.project,
+                            exportStarter = exportStarter,
+                            initialFormat = current.initialFormat,
+                            // 再試行として開かれたときだけ、成功後に取り残されたレコードを閉じる
+                            resolveInterruptedExport =
+                                current.interruptedRecordId?.let { recordId ->
+                                    { resolveInterruptedExport(recordId) }
+                                },
                         ),
                 )
             ExportRoute(
@@ -390,6 +402,11 @@ private sealed interface MainDestination {
         val project: ExportProjectSummary,
         /** 未完了の書き出しの再試行では前回の出力形式を選んだ状態で開く（同 §3.2 末尾） */
         val initialFormat: ExportType = ExportType.SEARCHABLE_PDF,
+        /**
+         * 再試行の対象になっている未完了レコード（通常の書き出しでは null）。
+         * 書き出しが成功したときだけ、このレコードを終端させて提示を解消する。
+         */
+        val interruptedRecordId: UUID? = null,
         val instanceId: UUID = UUID.randomUUID(),
     ) : MainDestination
 
