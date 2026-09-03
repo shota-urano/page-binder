@@ -52,9 +52,26 @@ e2e:
 # エージェントに毎回起動方法を説明するラリーが消える（2026-07-27 追加）。
 # bootstrap が LAUNCH_ACTIVITY を AndroidManifest から確定する。エミュレータは事前起動が必要。
 LAUNCH_ACTIVITY := .MainActivity
+# applicationId は AGP が APK と一緒に出力する output-metadata.json から解決する。
+# （AGP 8 の `:app:properties` は namespace / applicationId を出力しないため、
+#   そこからの awk 抽出は必ず空文字になり `/.MainActivity` という壊れた Intent を投げていた）
+# ここは「いま installDebug で端末へ入った APK 自身のメタデータ」なので、
+# 起動対象と実際にインストールされたパッケージが必ず一致する。
+APK_METADATA := $(MODULE)/build/outputs/apk/debug/output-metadata.json
 run:
 	$(GRADLE) :$(MODULE):installDebug
-	adb shell am start -n "$$(./gradlew -q :$(MODULE):properties | awk -F': ' '/^namespace:/{print $$2}')/$(LAUNCH_ACTIVITY)"
+	@app_id=$$(sed -n 's/.*"applicationId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$(APK_METADATA)" 2>/dev/null | head -1); \
+	if [ -z "$$app_id" ]; then \
+		echo "RUN: FAIL (applicationId を $(APK_METADATA) から解決できませんでした)"; \
+		exit 1; \
+	fi; \
+	echo "RUN: starting $$app_id/$(LAUNCH_ACTIVITY)"; \
+	start_out=$$(adb shell am start -n "$$app_id/$(LAUNCH_ACTIVITY)" 2>&1); \
+	echo "$$start_out"; \
+	case "$$start_out" in \
+		*Error*|*error*) echo "RUN: FAIL (起動に失敗しました)"; exit 1 ;; \
+	esac; \
+	echo "RUN: OK"
 
 # artifacts（動画回収）は Android 未実装。`adb shell screenrecord` を
 # connectedAndroidTest と並走させる形が必要で未較正（Phase 3）。
