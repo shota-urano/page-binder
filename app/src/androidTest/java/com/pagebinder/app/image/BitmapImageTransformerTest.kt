@@ -67,13 +67,13 @@ class BitmapImageTransformerTest {
 
     @Test
     fun transformUsesSharedIntegerBoundsForNonIntegerCropEdges() {
-        val source = patternedBitmap(width = 100, height = 100)
+        val source = coordinateBitmap(width = 100, height = 100)
 
         listOf(
-            Triple(0.123f, 0.876f, 76),
-            Triple(0.53f, 1f, 47),
-            Triple(0.129995f, 0.870005f, 76),
-        ).forEach { (left, right, expectedWidth) ->
+            CropCase(0.123f, 0.876f, ImagePixelRect(left = 12, top = 0, right = 88, bottom = 100)),
+            CropCase(0.53f, 1f, ImagePixelRect(left = 53, top = 0, right = 100, bottom = 100)),
+            CropCase(0.129995f, 0.870005f, ImagePixelRect(left = 12, top = 0, right = 88, bottom = 100)),
+        ).forEach { (left, right, expectedBounds) ->
             val transformed =
                 BitmapImageTransformer.transform(
                     source = source,
@@ -81,8 +81,21 @@ class BitmapImageTransformerTest {
                     crop = PageCrop(left = left, right = right),
                 )
 
-            assertEquals(expectedWidth, transformed.width)
-            assertEquals(100, transformed.height)
+            assertEquals(expectedBounds.width, transformed.width)
+            assertEquals(expectedBounds.height, transformed.height)
+            assertEquals(source.getPixel(expectedBounds.left, expectedBounds.top), transformed.getPixel(0, 0))
+            assertEquals(
+                source.getPixel(expectedBounds.right - 1, expectedBounds.top),
+                transformed.getPixel(transformed.width - 1, 0),
+            )
+            assertEquals(
+                source.getPixel(expectedBounds.left, expectedBounds.bottom - 1),
+                transformed.getPixel(0, transformed.height - 1),
+            )
+            assertEquals(
+                source.getPixel(expectedBounds.right - 1, expectedBounds.bottom - 1),
+                transformed.getPixel(transformed.width - 1, transformed.height - 1),
+            )
             transformed.recycle()
         }
 
@@ -100,4 +113,22 @@ class BitmapImageTransformerTest {
                 }
             }
         }
+
+    private fun coordinateBitmap(
+        width: Int,
+        height: Int,
+    ): Bitmap =
+        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
+            for (y in 0 until height) {
+                for (x in 0 until width) {
+                    setPixel(x, y, Color.argb(255, x, y, 0))
+                }
+            }
+        }
+
+    private data class CropCase(
+        val left: Float,
+        val right: Float,
+        val expectedBounds: ImagePixelRect,
+    )
 }
