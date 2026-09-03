@@ -478,12 +478,71 @@ class ExportViewModelTest {
             viewModel.onCancelExport()
         }
 
+    // --- 未完了の書き出しの再試行（docs/specs/11-export.md §3.2 末尾）--------------
+
+    @Test
+    fun `再試行の書き出しが成功したときだけ取り残されたレコードを終端させる`() =
+        runTest {
+            var resolveCalls = 0
+            val starter = RecordingExportStarter(listOf(ExportProgressEvent.Succeeded))
+            val viewModel = retriedExport(starter) { resolveCalls++ }
+
+            assertEquals(ExportResultUiState.Succeeded, viewModel.uiState.value.result)
+            assertEquals("成功で取り残しが解消されること", 1, resolveCalls)
+        }
+
+    @Test
+    fun `再試行の書き出しが失敗したら取り残されたレコードは残す`() =
+        runTest {
+            var resolveCalls = 0
+            val starter =
+                RecordingExportStarter(
+                    listOf(ExportProgressEvent.Failed(ExportFailureCode.GENERATION_FAILED)),
+                )
+            val viewModel = retriedExport(starter) { resolveCalls++ }
+
+            assertNotNull(viewModel.uiState.value.result)
+            assertEquals("失敗では解消しない（書籍詳細に提示が残る）", 0, resolveCalls)
+        }
+
+    @Test
+    fun `保存先を選ばずに閉じたら取り残されたレコードは残る`() =
+        runTest {
+            var resolveCalls = 0
+            val starter = RecordingExportStarter(listOf(ExportProgressEvent.Succeeded))
+            val viewModel =
+                viewModel(starter = starter, resolveInterruptedExport = { resolveCalls++ })
+            viewModel.onPermissionConfirmedChange(true)
+            viewModel.onStartExportRequested()
+            viewModel.onSafRequestHandled()
+
+            // SAF をキャンセルした（書き出しは始まらない）
+            viewModel.onDestinationSelected(null)
+
+            assertEquals(0, starter.startCount)
+            assertEquals("再試行画面を開いただけでは解消しない", 0, resolveCalls)
+        }
+
     // --- ヘルパ -----------------------------------------------------------------
 
     private fun viewModel(
         project: ExportProjectSummary = project(),
         starter: ExportStarter = RecordingExportStarter(),
-    ) = ExportViewModel(project, starter)
+        resolveInterruptedExport: (suspend () -> Unit)? = null,
+    ) = ExportViewModel(project, starter, ExportType.SEARCHABLE_PDF, resolveInterruptedExport)
+
+    /** 未完了の書き出しの再試行として開き、保存先まで選んだ ViewModel */
+    private fun retriedExport(
+        starter: RecordingExportStarter,
+        resolveInterruptedExport: suspend () -> Unit,
+    ): ExportViewModel {
+        val viewModel = viewModel(starter = starter, resolveInterruptedExport = resolveInterruptedExport)
+        viewModel.onPermissionConfirmedChange(true)
+        viewModel.onStartExportRequested()
+        viewModel.onSafRequestHandled()
+        viewModel.onDestinationSelected(DESTINATION_URI)
+        return viewModel
+    }
 
     private fun project(
         projectId: UUID = UUID.randomUUID(),

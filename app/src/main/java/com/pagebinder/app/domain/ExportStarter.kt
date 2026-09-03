@@ -28,6 +28,12 @@ sealed interface ExportProgressEvent {
 object ExportFailureCode {
     const val CANCELLED = "cancelled"
     const val GENERATION_FAILED = "generation_failed"
+
+    /**
+     * プロセス終了で取り残された書き出しを、再試行が成功したあとに終端させるときの理由。
+     * 完了で確定していない書き出しは成功にできない（FR-EXP-007）ので failed 側で閉じる。
+     */
+    const val INTERRUPTED = "interrupted"
 }
 
 /**

@@ -4,6 +4,8 @@ import com.pagebinder.app.domain.BookProject
 import com.pagebinder.app.domain.BookProjectRepository
 import com.pagebinder.app.domain.BookProjectSort
 import com.pagebinder.app.domain.BookProjectSummary
+import com.pagebinder.app.domain.ExportType
+import com.pagebinder.app.domain.InterruptedExport
 import com.pagebinder.app.domain.Page
 import com.pagebinder.app.domain.PageCrop
 import com.pagebinder.app.domain.PageOcrState
@@ -166,9 +168,11 @@ class BookDetailViewModelTest : BookProjectViewModelTestBase() {
                 )
             val viewModel =
                 BookDetailViewModel(
-                    summary.project.id,
-                    FakeBookProjectRepository(active = mutableListOf(summary)),
-                ) { 0 }
+                    projectId = summary.project.id,
+                    repository = FakeBookProjectRepository(active = mutableListOf(summary)),
+                    enqueueProjectOcr = { 0 },
+                    findInterruptedExports = { emptyList() },
+                )
 
             val state = viewModel.uiState.value
             assertEquals(12, state.pageCount)
@@ -187,7 +191,7 @@ class BookDetailViewModelTest : BookProjectViewModelTestBase() {
         runTest {
             val empty = summary(title = "Detail", pageCount = 0, storageBytes = 0)
             val repository = FakeBookProjectRepository(active = mutableListOf(empty))
-            val viewModel = BookDetailViewModel(empty.project.id, repository) { 0 }
+            val viewModel = BookDetailViewModel(empty.project.id, repository, { 0 }) { emptyList() }
 
             // 撮影前: 書き出しは無効（1ページも無い書籍には成果物が無い）
             assertEquals(0, viewModel.uiState.value.pageCount)
@@ -215,7 +219,7 @@ class BookDetailViewModelTest : BookProjectViewModelTestBase() {
         runTest {
             val initial = summary(title = "Detail", pageCount = 1, storageBytes = 1_000)
             val repository = FakeBookProjectRepository(active = mutableListOf(initial))
-            val viewModel = BookDetailViewModel(initial.project.id, repository) { 0 }
+            val viewModel = BookDetailViewModel(initial.project.id, repository, { 0 }) { emptyList() }
 
             viewModel.onMoveToTrashRequested()
             repository.publish(initial.copy(pageCount = 3, storageBytes = 3_000))
@@ -230,12 +234,105 @@ class BookDetailViewModelTest : BookProjectViewModelTestBase() {
         runTest {
             val summary = summary(title = "Detail")
             val viewModel =
-                BookDetailViewModel(summary.project.id, FakeBookProjectRepository(active = mutableListOf(summary))) {
-                    throw IOException()
-                }
+                BookDetailViewModel(
+                    projectId = summary.project.id,
+                    repository = FakeBookProjectRepository(active = mutableListOf(summary)),
+                    enqueueProjectOcr = { throw IOException() },
+                    findInterruptedExports = { emptyList() },
+                )
             viewModel.onOcrBatchRequested()
             assertEquals(BookDetailOperationError.OCR_BATCH, viewModel.uiState.value.operationError)
             assertFalse(viewModel.uiState.value.operationInProgress)
+        }
+
+    /**
+     * 未完了の提示はレコードの実状態に従う（docs/specs/11-export.md §3.2 末尾）。
+     * 「再試行を押した」ことでは消えない — 書き出し画面から戻る・SAF を閉じるだけなら
+     * レコードは queued / running のまま残っており、再試行の導線を失わせてはならない。
+     */
+    @Test
+    fun `未完了の提示は再試行では消えずレコードが残る限り出続ける`() =
+        runTest {
+            val summary = summary(title = "Detail", pageCount = 3)
+            val markdown = InterruptedExport(UUID.randomUUID(), ExportType.MARKDOWN)
+            val imageZip = InterruptedExport(UUID.randomUUID(), ExportType.IMAGE_ZIP)
+            val incomplete = mutableListOf(markdown, imageZip)
+            var detectCalls = 0
+            val viewModel =
+                BookDetailViewModel(
+                    projectId = summary.project.id,
+                    repository = FakeBookProjectRepository(active = mutableListOf(summary)),
+                    enqueueProjectOcr = { 0 },
+                    findInterruptedExports = {
+                        detectCalls++
+                        incomplete.toList()
+                    },
+                )
+
+            // 書籍詳細を開いた時点で検出が走り、最も古い未完了が再試行対象になる
+            assertEquals(1, detectCalls)
+            assertEquals(markdown.recordId, viewModel.uiState.value.interruptedExport?.recordId)
+            assertEquals(ExportType.MARKDOWN, viewModel.uiState.value.interruptedExport?.format)
+            assertEquals(2, viewModel.uiState.value.interruptedExport?.count)
+
+            // 統計の更新では提示が消えない
+            viewModel.onOcrBatchRequested()
+            assertNotNull(viewModel.uiState.value.interruptedExport)
+
+            // 再試行 → 書き出し画面から戻る（レコードは未完了のまま）。提示は同じ対象で出続ける
+            viewModel.load()
+            assertEquals(2, detectCalls)
+            assertEquals(markdown.recordId, viewModel.uiState.value.interruptedExport?.recordId)
+            assertEquals(2, viewModel.uiState.value.interruptedExport?.count)
+        }
+
+    /** 複数件は古い順に1件ずつ。1件解消しても残りの提示と再試行は失われない */
+    @Test
+    fun `未完了が複数あるとき1件解消すると残りが提示される`() =
+        runTest {
+            val summary = summary(title = "Detail", pageCount = 3)
+            val markdown = InterruptedExport(UUID.randomUUID(), ExportType.MARKDOWN)
+            val imageZip = InterruptedExport(UUID.randomUUID(), ExportType.IMAGE_ZIP)
+            val incomplete = mutableListOf(markdown, imageZip)
+            val viewModel =
+                BookDetailViewModel(
+                    projectId = summary.project.id,
+                    repository = FakeBookProjectRepository(active = mutableListOf(summary)),
+                    enqueueProjectOcr = { 0 },
+                    findInterruptedExports = { incomplete.toList() },
+                )
+
+            assertEquals(2, viewModel.uiState.value.interruptedExport?.count)
+
+            // 再試行が成功して最も古いレコードが終端した（検出から外れる）
+            incomplete.remove(markdown)
+            viewModel.load()
+
+            assertEquals(imageZip.recordId, viewModel.uiState.value.interruptedExport?.recordId)
+            assertEquals(ExportType.IMAGE_ZIP, viewModel.uiState.value.interruptedExport?.format)
+            assertEquals(1, viewModel.uiState.value.interruptedExport?.count)
+
+            // 残り1件も解消したら提示が消える
+            incomplete.remove(imageZip)
+            viewModel.load()
+
+            assertNull(viewModel.uiState.value.interruptedExport)
+        }
+
+    @Test
+    fun `detection failure leaves the screen without an interrupted export`() =
+        runTest {
+            val summary = summary(title = "Detail")
+            val viewModel =
+                BookDetailViewModel(
+                    projectId = summary.project.id,
+                    repository = FakeBookProjectRepository(active = mutableListOf(summary)),
+                    enqueueProjectOcr = { 0 },
+                    findInterruptedExports = { throw IOException() },
+                )
+
+            assertNull(viewModel.uiState.value.interruptedExport)
+            assertNull(viewModel.uiState.value.operationError)
         }
 }
 

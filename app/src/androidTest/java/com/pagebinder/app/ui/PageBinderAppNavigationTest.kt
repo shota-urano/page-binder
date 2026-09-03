@@ -4,6 +4,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -23,6 +25,8 @@ import com.pagebinder.app.domain.BookProjectSummary
 import com.pagebinder.app.domain.CaptureFeedbackSettings
 import com.pagebinder.app.domain.CaptureFeedbackSettingsRepository
 import com.pagebinder.app.domain.ExportStarter
+import com.pagebinder.app.domain.ExportType
+import com.pagebinder.app.domain.InterruptedExport
 import com.pagebinder.app.domain.Page
 import com.pagebinder.app.domain.PageCrop
 import com.pagebinder.app.domain.PageCropScope
@@ -175,6 +179,100 @@ class PageBinderAppNavigationTest {
         awaitText(R.string.page_list_title)
     }
 
+    @Test
+    fun `未完了の書き出しが無ければ書籍詳細に再試行の導線は出ない`() {
+        showApp(pageCount = 2)
+        openBookDetail()
+
+        composeTestRule
+            .onNodeWithText(string(R.string.book_detail_interrupted_export_action))
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun `未完了の書き出しがあると書籍詳細に件数付きの提示と再試行が出る`() {
+        showApp(pageCount = 2, interruptedExports = mutableListOf(interruptedExport(ExportType.MARKDOWN)))
+        openBookDetail()
+
+        awaitText(R.string.book_detail_interrupted_export_action)
+        composeTestRule
+            .onNodeWithText(context.getString(R.string.book_detail_interrupted_export, 1))
+            .assertIsDisplayed()
+    }
+
+    /**
+     * 再試行を押しただけでは提示を消さない（docs/specs/11-export.md §3.2 末尾）。
+     * 書き出し画面から戻る・SAF を閉じるだけならレコードは未完了のまま残るので、
+     * 書籍詳細へ戻れば同じ提示と再試行の導線が出ていなければならない。
+     */
+    @Test
+    fun `再試行を押して戻っても未完了レコードが残る限り提示は出続ける`() {
+        showApp(pageCount = 2, interruptedExports = mutableListOf(interruptedExport(ExportType.MARKDOWN)))
+        openBookDetail()
+
+        awaitText(R.string.book_detail_interrupted_export_action)
+        composeTestRule
+            .onNodeWithText(string(R.string.book_detail_interrupted_export_action))
+            .performClick()
+
+        // 書き出し画面に着き、前回の未完了と同じ形式（Markdown）が選ばれている
+        awaitText(R.string.export_format_title)
+        composeTestRule.onNodeWithText(string(R.string.export_format_markdown)).assertIsSelected()
+        composeTestRule.onNodeWithText(string(R.string.export_format_searchable_pdf)).assertIsNotSelected()
+
+        // 書き出さずに戻る。レコードは未完了のままなので提示も再試行も残っている
+        composeTestRule.onNodeWithContentDescription(string(R.string.export_back)).performClick()
+        awaitText(R.string.book_detail_manual_capture)
+        awaitText(R.string.book_detail_interrupted_export_action)
+        composeTestRule
+            .onNodeWithText(context.getString(R.string.book_detail_interrupted_export, 1))
+            .assertIsDisplayed()
+    }
+
+    /**
+     * 複数件の未完了は古い順に1件ずつ。1件解消しても残りの提示と再試行は失われず、
+     * 全件解消したときだけ提示が消える。
+     */
+    @Test
+    fun `未完了が2件あるとき1件解消しても残りを再試行できる`() {
+        val markdown = interruptedExport(ExportType.MARKDOWN)
+        val imageZip = interruptedExport(ExportType.IMAGE_ZIP)
+        val interrupted = mutableListOf(markdown, imageZip)
+        showApp(pageCount = 2, interruptedExports = interrupted)
+        openBookDetail()
+
+        awaitTextValue(context.getString(R.string.book_detail_interrupted_export, 2))
+        composeTestRule
+            .onNodeWithText(string(R.string.book_detail_interrupted_export_action))
+            .performClick()
+        awaitText(R.string.export_format_title)
+        composeTestRule.onNodeWithText(string(R.string.export_format_markdown)).assertIsSelected()
+
+        // 再試行の書き出しが成功し、最も古いレコードが終端した（検出から外れる）
+        interrupted.remove(markdown)
+        composeTestRule.onNodeWithContentDescription(string(R.string.export_back)).performClick()
+        awaitText(R.string.book_detail_manual_capture)
+
+        // 残り1件が提示され、こちらも再試行できる
+        awaitTextValue(context.getString(R.string.book_detail_interrupted_export, 1))
+        composeTestRule
+            .onNodeWithText(string(R.string.book_detail_interrupted_export_action))
+            .performClick()
+        awaitText(R.string.export_format_title)
+        composeTestRule.onNodeWithText(string(R.string.export_format_image_zip)).assertIsSelected()
+
+        // 全件解消したら提示が消える
+        interrupted.remove(imageZip)
+        composeTestRule.onNodeWithContentDescription(string(R.string.export_back)).performClick()
+        awaitText(R.string.book_detail_manual_capture)
+        composeTestRule.waitUntil("未完了の提示が消えない", TIMEOUT_MILLIS) {
+            composeTestRule
+                .onAllNodesWithText(string(R.string.book_detail_interrupted_export_action))
+                .fetchSemanticsNodes()
+                .isEmpty()
+        }
+    }
+
     private fun openBookDetail() {
         awaitText(R.string.home_search_hint)
         composeTestRule.waitUntil("ホームに書籍が出ない", TIMEOUT_MILLIS) {
@@ -184,7 +282,16 @@ class PageBinderAppNavigationTest {
         awaitText(R.string.book_detail_manual_capture)
     }
 
-    private fun showApp(pageCount: Int) {
+    private fun interruptedExport(type: ExportType) = InterruptedExport(UUID.randomUUID(), type)
+
+    /**
+     * [interruptedExports] は本番の検出（ExportRecord の queued / running）の代役。
+     * テストから中身を減らすことで「レコードが解消された」状態を作れる。
+     */
+    private fun showApp(
+        pageCount: Int,
+        interruptedExports: MutableList<InterruptedExport> = mutableListOf(),
+    ) {
         val pages =
             (1..pageCount).map { sequence ->
                 page(if (sequence == 1) pageId else UUID.randomUUID(), sequence)
@@ -203,6 +310,11 @@ class PageBinderAppNavigationTest {
                     // 書き出しの実処理は ProjectExportStarterTest 側で見る。ここは導線だけ
                     exportStarter = ExportStarter { emptyFlow() },
                     enqueueProjectOcr = { 0 },
+                    findInterruptedExports = { interruptedExports.toList() },
+                    // 本番は ExportRecord を終端させる。ここでは検出から外すことで同じ効果にする
+                    resolveInterruptedExport = { recordId ->
+                        interruptedExports.removeAll { it.recordId == recordId }
+                    },
                     autoCaptureSettingsRepository = FakeAutoCaptureSettingsRepository(),
                     captureFeedbackSettingsRepository = FakeCaptureFeedbackSettingsRepository(),
                     startCapture = { _, _ -> },
@@ -251,7 +363,10 @@ class PageBinderAppNavigationTest {
     private fun string(resId: Int): String = context.getString(resId)
 
     private fun awaitText(resId: Int) {
-        val text = string(resId)
+        awaitTextValue(string(resId))
+    }
+
+    private fun awaitTextValue(text: String) {
         composeTestRule.waitUntil("画面に「$text」が出ない", TIMEOUT_MILLIS) {
             composeTestRule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
         }
