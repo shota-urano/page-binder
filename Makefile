@@ -14,7 +14,7 @@ FAST_CHECKS := lint
 # フル検証。e2e（connectedAndroidTest）はエミュレータ起動が前提
 CHECKS := $(FAST_CHECKS) test android-lint manifest-check build e2e
 
-.PHONY: verify verify-fast lint test android-lint manifest-check build e2e run
+.PHONY: verify verify-fast lint test android-lint manifest-check build e2e release run
 
 verify: $(CHECKS)
 	@test -n "$(strip $(CHECKS))" || { echo "VERIFY: FAIL (検証項目がゼロ)"; exit 1; }
@@ -43,6 +43,9 @@ manifest-check:
 
 build:
 	$(GRADLE) :$(MODULE):assembleDebug
+
+release:
+	$(GRADLE) :$(MODULE):assembleRelease
 
 # E2E（instrumented test）。エミュレータ必須 — 事前に `adb devices` で1台以上を確認
 e2e:
