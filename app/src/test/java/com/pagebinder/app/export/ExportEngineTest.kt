@@ -444,6 +444,12 @@ class ExportEngineTest {
             records[expected.id] = updated
             return true
         }
+
+        override suspend fun compareAndDelete(expected: ExportRecord): Boolean {
+            if (records[expected.id] != expected) return false
+            records.remove(expected.id)
+            return true
+        }
     }
 
     private class RecordingStorageGateway : ExportStorageGateway {

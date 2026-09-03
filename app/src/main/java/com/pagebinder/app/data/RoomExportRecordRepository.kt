@@ -83,6 +83,30 @@ interface ExportRecordDao {
 
     @Query("DELETE FROM export_records WHERE id = :id")
     suspend fun deleteById(id: String): Int
+
+    @Query(
+        """
+        DELETE FROM export_records
+        WHERE id = :expectedId
+          AND project_id = :expectedProjectId
+          AND type = :expectedType
+          AND target_uri IS :expectedTargetUri
+          AND state = :expectedState
+          AND created_at = :expectedCreatedAt
+          AND completed_at IS :expectedCompletedAt
+          AND error_code IS :expectedErrorCode
+        """,
+    )
+    suspend fun compareAndDelete(
+        expectedId: String,
+        expectedProjectId: String,
+        expectedType: String,
+        expectedTargetUri: String?,
+        expectedState: String,
+        expectedCreatedAt: String,
+        expectedCompletedAt: String?,
+        expectedErrorCode: String?,
+    ): Int
 }
 
 /** Room-backed production adapter for export history persistence. */
@@ -120,6 +144,20 @@ class RoomExportRecordRepository(
             updatedCreatedAt = updatedEntity.createdAt.toString(),
             updatedCompletedAt = updatedEntity.completedAt?.toString(),
             updatedErrorCode = updatedEntity.errorCode,
+        ) == 1
+    }
+
+    override suspend fun compareAndDelete(expected: ExportRecord): Boolean {
+        val expectedEntity = expected.toEntity()
+        return dao.compareAndDelete(
+            expectedId = expectedEntity.id.toString(),
+            expectedProjectId = expectedEntity.projectId.toString(),
+            expectedType = expectedEntity.type.serializedName,
+            expectedTargetUri = expectedEntity.targetUri,
+            expectedState = expectedEntity.state.serializedName,
+            expectedCreatedAt = expectedEntity.createdAt.toString(),
+            expectedCompletedAt = expectedEntity.completedAt?.toString(),
+            expectedErrorCode = expectedEntity.errorCode,
         ) == 1
     }
 }

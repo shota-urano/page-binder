@@ -69,27 +69,34 @@ class ExportRecordCoordinator(
     }
 
     /**
-     * プロセス終了で queued / running のまま取り残されたレコードを終端させる
-     * （docs/specs/11-export.md §3.2 手順6「queued → running → succeeded / failed を記録する」を閉じる）。
+     * プロセス終了で queued / running のまま取り残されたレコードを片付ける
+     * （docs/specs/11-export.md §3.2 末尾「アプリ強制終了後、未完了の書き出しを検出して再試行できる」）。
+     * 呼ぶのは再試行の書き出しが成功したときだけ。
      *
-     * 呼ぶのは再試行の書き出しが成功したときだけ。取り残された方は完了で確定していない
-     * （同 手順5 / FR-EXP-007: 不完全ファイルを成功扱いしない）ので failed + `interrupted` で閉じる。
-     * すでに終端しているレコードはそのまま返すので、多重に呼ばれても壊れない。
+     * 仕様の状態遷移は `queued → running → succeeded / failed`（同 手順6）で、queued から終端へ
+     * 直接向かう遷移は無い。そこで取り残されたレコードは**実行に入っていたか**で扱いを分ける。
+     *
+     * - running: 保存先に書きかけの成果物が残りうる。完了で確定していないので成功扱いにはできず
+     *   （同 手順5 / FR-EXP-007）、[markFailed] と同じ `running → failed` で errorCode に
+     *   `interrupted` を付けて閉じる
+     * - queued: 実行に入っておらず、保存先も成果物も無い。仕様に無い終端状態を作らず、
+     *   書き出しの履歴から取り除く（この書き出しの履歴は再試行側のレコードが持つ）
+     *
+     * すでに終端しているレコードには触れずそのまま返す。queued を取り除いた場合と、
+     * 取り除いたあとにもう一度呼ばれた場合は null を返すので、多重に呼ばれても壊れない。
      */
-    suspend fun markInterrupted(id: UUID): ExportRecord {
-        val current = repository.findById(id) ?: throw ExportRecordNotFoundException(id)
-        if (current.state != ExportState.QUEUED && current.state != ExportState.RUNNING) return current
-
-        val updated =
-            current.copy(
-                state = ExportState.FAILED,
-                completedAt = Instant.now(clock),
-                errorCode = ExportFailureCode.INTERRUPTED,
-            )
-        if (!repository.compareAndSet(current, updated)) {
-            throw ConcurrentExportRecordUpdateException(id)
+    suspend fun markInterrupted(id: UUID): ExportRecord? {
+        val current = repository.findById(id) ?: return null
+        return when (current.state) {
+            ExportState.RUNNING -> markFailed(id, ExportFailureCode.INTERRUPTED)
+            ExportState.QUEUED -> {
+                if (!repository.compareAndDelete(current)) {
+                    throw ConcurrentExportRecordUpdateException(id)
+                }
+                null
+            }
+            ExportState.SUCCEEDED, ExportState.FAILED -> current
         }
-        return updated
     }
 
     private suspend fun transition(
