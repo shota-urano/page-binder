@@ -234,8 +234,7 @@ private fun PageBinderMain(
                         onReload = detailViewModel::load,
                         manualCaptureAvailable = !detailState.loading,
                         continuousCaptureAvailable = !detailState.loading,
-                        // 1ページも無い書籍には書き出す成果物が無い（docs/specs/11-export.md §2 入力）
-                        exportAvailable = !detailState.loading && detailState.pageCount > 0,
+                        exportAvailable = detailState.exportAvailable,
                     ),
             )
         }

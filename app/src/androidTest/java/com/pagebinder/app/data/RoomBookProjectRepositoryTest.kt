@@ -7,10 +7,15 @@ import androidx.room.TypeConverters
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pagebinder.app.domain.BookProjectRepositoryException
+import com.pagebinder.app.domain.BookProjectSummary
 import com.pagebinder.app.domain.PageOcrState
 import com.pagebinder.app.domain.PageQualityState
 import com.pagebinder.app.storage.ProjectFileStore
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -101,6 +106,47 @@ class RoomBookProjectRepositoryTest {
             assertEquals(1, summary.ocrErrorCount)
         }
 
+    /**
+     * pagebinder-fu6: 撮影オーバーレイの裏で書籍詳細が前面に残ったままでも統計が更新されること。
+     * 一度読みの実装ではここでページ数 0 のまま止まり、書き出しが無効に見えていた。
+     */
+    @Test
+    fun observedSummaryReEmitsWhenPagesAreAddedAndDeleted() =
+        runBlocking {
+            val fileStore = GrowingProjectFileStore()
+            val repository =
+                RoomBookProjectRepository(
+                    dao = database.bookProjectDao(),
+                    fileStore = fileStore,
+                    now = { Instant.parse("2026-08-30T00:00:00Z") },
+                    newId = { projectId },
+                )
+            repository.create("Observed", null, null)
+
+            val emissions = Channel<BookProjectSummary?>(Channel.UNLIMITED)
+            val collectJob = launch { repository.observeSummaryById(projectId).collect(emissions::send) }
+            try {
+                assertEquals(0, emissions.awaitSummary { it?.pageCount == 0 }?.pageCount)
+
+                fileStore.sizeBytes = 634_061
+                database.pageDao().insert(testPage(projectId, 1))
+                database.pageDao().insert(testPage(projectId, 2))
+
+                val captured = emissions.awaitSummary { it?.pageCount == 2 }
+                assertEquals(634_061L, captured?.storageBytes)
+
+                fileStore.sizeBytes = 0
+                RoomPageRepository(database.pageDao()).delete(
+                    projectId,
+                    setOf(UUID.fromString("20000000-0000-0000-0000-000000000001")),
+                )
+
+                assertEquals(1, emissions.awaitSummary { it?.pageCount == 1 }?.pageCount)
+            } finally {
+                collectJob.cancel()
+            }
+        }
+
     @Test
     fun blackCaptureDoesNotIncreaseOcrErrorCount() =
         runBlocking {
@@ -127,6 +173,28 @@ private object FailingProjectFileStore : ProjectFileStore {
 
     override fun sizeBytes(projectId: UUID): Long = 0L
 }
+
+/** 使用容量が購読のたびに測り直されることを確かめるための、書き換え可能なファイル領域。 */
+private class GrowingProjectFileStore(
+    var sizeBytes: Long = 0L,
+) : ProjectFileStore {
+    override fun create(projectId: UUID) = Unit
+
+    override fun delete(projectId: UUID) = Unit
+
+    override fun sizeBytes(projectId: UUID): Long = sizeBytes
+}
+
+private suspend fun ReceiveChannel<BookProjectSummary?>.awaitSummary(
+    predicate: (BookProjectSummary?) -> Boolean,
+): BookProjectSummary? =
+    withTimeout(OBSERVE_TIMEOUT_MILLIS) {
+        var value = receive()
+        while (!predicate(value)) value = receive()
+        value
+    }
+
+private const val OBSERVE_TIMEOUT_MILLIS = 5_000L
 
 private class EmptyProjectFileStore : ProjectFileStore {
     override fun create(projectId: UUID) = Unit

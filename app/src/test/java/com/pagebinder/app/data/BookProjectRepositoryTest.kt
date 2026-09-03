@@ -3,6 +3,8 @@ package com.pagebinder.app.data
 import com.pagebinder.app.domain.BookProjectRepositoryException
 import com.pagebinder.app.domain.BookProjectSort
 import com.pagebinder.app.storage.ProjectFileStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -195,6 +197,8 @@ private class InMemoryBookProjectDao : BookProjectDao() {
 
     override suspend fun findSummaryById(id: String): BookProjectAggregateEntity? =
         projects[id]?.let { BookProjectAggregateEntity(it, pageCounts[id] ?: 0) }
+
+    override fun observeSummaryById(id: String): Flow<BookProjectAggregateEntity?> = flow { emit(findSummaryById(id)) }
 
     override suspend fun updateMetadata(
         id: String,

@@ -34,7 +34,9 @@ import com.pagebinder.app.ui.consent.ConsentUiState
 import com.pagebinder.app.ui.pagelist.PageThumbnailLoader
 import com.pagebinder.app.ui.pagelist.pageListCellTestTag
 import com.pagebinder.app.ui.theme.PageBinderTheme
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -324,6 +326,9 @@ class PageBinderAppNavigationTest {
         override suspend fun findById(id: UUID): BookProject? = summary.project.takeIf { it.id == id }
 
         override suspend fun findSummaryById(id: UUID): BookProjectSummary? = summary.takeIf { it.project.id == id }
+
+        override fun observeSummaryById(id: UUID): Flow<BookProjectSummary?> =
+            flowOf(summary.takeIf { it.project.id == id })
 
         override suspend fun update(
             id: UUID,

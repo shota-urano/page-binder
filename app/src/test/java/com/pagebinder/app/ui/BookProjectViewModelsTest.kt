@@ -18,6 +18,10 @@ import com.pagebinder.app.ui.trash.TrashOperationError
 import com.pagebinder.app.ui.trash.TrashViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -179,6 +183,49 @@ class BookDetailViewModelTest : BookProjectViewModelTestBase() {
         }
 
     @Test
+    fun `capture and deletion update statistics without leaving the screen`() =
+        runTest {
+            val empty = summary(title = "Detail", pageCount = 0, storageBytes = 0)
+            val repository = FakeBookProjectRepository(active = mutableListOf(empty))
+            val viewModel = BookDetailViewModel(empty.project.id, repository) { 0 }
+
+            // 撮影前: 書き出しは無効（1ページも無い書籍には成果物が無い）
+            assertEquals(0, viewModel.uiState.value.pageCount)
+            assertEquals(0L, viewModel.uiState.value.storageBytes)
+            assertFalse(viewModel.uiState.value.exportAvailable)
+
+            // 撮影オーバーレイで2ページ増えた（書籍詳細は前面に出たまま・load を呼び直さない）
+            repository.publish(empty.copy(pageCount = 2, storageBytes = 634_061, ocrCompletedCount = 1))
+
+            val captured = viewModel.uiState.value
+            assertEquals(2, captured.pageCount)
+            assertEquals(634_061L, captured.storageBytes)
+            assertEquals(1, captured.ocrCompletedCount)
+            assertTrue(captured.exportAvailable)
+
+            // ページ削除でも同じ購読で戻る
+            repository.publish(empty.copy(pageCount = 0, storageBytes = 0, ocrCompletedCount = 0))
+
+            assertEquals(0, viewModel.uiState.value.pageCount)
+            assertFalse(viewModel.uiState.value.exportAvailable)
+        }
+
+    @Test
+    fun `statistics keep updating while a confirmation dialog is open`() =
+        runTest {
+            val initial = summary(title = "Detail", pageCount = 1, storageBytes = 1_000)
+            val repository = FakeBookProjectRepository(active = mutableListOf(initial))
+            val viewModel = BookDetailViewModel(initial.project.id, repository) { 0 }
+
+            viewModel.onMoveToTrashRequested()
+            repository.publish(initial.copy(pageCount = 3, storageBytes = 3_000))
+
+            assertEquals(3, viewModel.uiState.value.pageCount)
+            // 確認ダイアログは購読の再発行で閉じない（表示値は要求時点のスナップショット）
+            assertEquals(1, viewModel.uiState.value.moveToTrashConfirmation?.pageCount)
+        }
+
+    @Test
     fun `OCR failure remains represented`() =
         runTest {
             val summary = summary(title = "Detail")
@@ -234,6 +281,8 @@ private class FakeBookProjectRepository(
     private val failRestore: Boolean = false,
     private val failFind: Boolean = false,
 ) : BookProjectRepository {
+    /** Room の再クエリに相当する再発行トリガー（ページ追加・削除で進む）。 */
+    private val revision = MutableStateFlow(0)
     val listSortCalls = mutableListOf<BookProjectSort>()
     val createCalls = mutableListOf<String>()
     val restoreCalls = mutableListOf<UUID>()
@@ -258,6 +307,20 @@ private class FakeBookProjectRepository(
 
     override suspend fun findSummaryById(id: UUID): BookProjectSummary? =
         (active + trash).firstOrNull { it.project.id == id }
+
+    override fun observeSummaryById(id: UUID): Flow<BookProjectSummary?> =
+        if (failFind) {
+            flow { throw IOException() }
+        } else {
+            revision.map { (active + trash).firstOrNull { summary -> summary.project.id == id } }
+        }
+
+    /** 撮影・ページ削除でページ数と使用容量が変わったことを購読者へ流す。 */
+    fun publish(updated: BookProjectSummary) {
+        active.removeAll { it.project.id == updated.project.id }
+        active += updated
+        revision.value += 1
+    }
 
     override suspend fun update(
         id: UUID,
