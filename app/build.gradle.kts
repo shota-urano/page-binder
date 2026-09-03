@@ -6,7 +6,28 @@ import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
+import java.util.Properties
 import javax.xml.parsers.DocumentBuilderFactory
+
+val releaseSigningProperties =
+    Properties().apply {
+        val propertiesFile = rootProject.file("keystore.properties")
+        if (propertiesFile.isFile) {
+            propertiesFile.inputStream().use(::load)
+        }
+    }
+
+fun releaseSigningValue(
+    propertyName: String,
+    environmentName: String,
+): String? =
+    releaseSigningProperties.getProperty(propertyName)?.takeIf { it.isNotBlank() }
+        ?: providers.environmentVariable(environmentName).orNull?.takeIf { it.isNotBlank() }
+
+val releaseStoreFilePath = releaseSigningValue("storeFile", "PAGEBINDER_RELEASE_STORE_FILE")
+val releaseStorePassword = releaseSigningValue("storePassword", "PAGEBINDER_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = releaseSigningValue("keyAlias", "PAGEBINDER_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = releaseSigningValue("keyPassword", "PAGEBINDER_RELEASE_KEY_PASSWORD")
 
 plugins {
     alias(libs.plugins.android.application)
@@ -109,9 +130,19 @@ android {
         testInstrumentationRunner = "com.pagebinder.app.PageBinderTestRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = releaseStoreFilePath?.let(rootProject::file)
+            storePassword = releaseStorePassword
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
@@ -130,6 +161,36 @@ android {
     sourceSets {
         getByName("androidTest").assets.srcDir("$projectDir/schemas")
     }
+}
+
+val validateReleaseSigning by tasks.registering {
+    group = "verification"
+    description = "Validates the external release signing configuration."
+
+    doLast {
+        val missingSettings =
+            buildList {
+                if (releaseStoreFilePath == null) add("storeFile")
+                if (releaseStorePassword == null) add("storePassword")
+                if (releaseKeyAlias == null) add("keyAlias")
+                if (releaseKeyPassword == null) add("keyPassword")
+            }
+        if (missingSettings.isNotEmpty()) {
+            throw GradleException(
+                "Release signing is not configured. Missing: ${missingSettings.joinToString()}. " +
+                    "Set keystore.properties or PAGEBINDER_RELEASE_* environment variables; " +
+                    "see docs/release-signing.md.",
+            )
+        }
+
+        if (!rootProject.file(releaseStoreFilePath!!).isFile) {
+            throw GradleException("Release signing keystore file does not exist; see docs/release-signing.md.")
+        }
+    }
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    dependsOn(validateReleaseSigning)
 }
 
 dependencies {
