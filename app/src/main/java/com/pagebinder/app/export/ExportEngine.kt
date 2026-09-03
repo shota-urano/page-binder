@@ -2,6 +2,8 @@ package com.pagebinder.app.export
 
 import com.pagebinder.app.domain.ExportDestination
 import com.pagebinder.app.domain.ExportFailureCode
+import com.pagebinder.app.domain.ExportOptions
+import com.pagebinder.app.domain.ExportPdfQuality
 import com.pagebinder.app.domain.ExportRecord
 import com.pagebinder.app.domain.ExportRecordRepository
 import com.pagebinder.app.domain.ExportState
@@ -59,7 +61,19 @@ data class ExportRequest(
     val projectId: UUID,
     val destination: ExportDestination,
     val artifact: ExportArtifact,
-)
+    val pdfQuality: ExportPdfQuality = ExportPdfQuality.STANDARD,
+) {
+    /** Bridges the UI's confirmed export options into the export implementation. */
+    constructor(
+        options: ExportOptions,
+        artifact: ExportArtifact,
+    ) : this(
+        projectId = options.projectId,
+        destination = options.destination,
+        artifact = artifact,
+        pdfQuality = options.pdfQuality,
+    )
+}
 
 enum class ExportPhase {
     QUEUED,
@@ -187,7 +201,7 @@ class ExportEngine(
             try {
                 running = recordCoordinator.markRunning(queued.id, request.destination.uri)
                 sendProgress(queued.id, ExportPhase.QUEUED, 0, 1)
-                generateArtifact(request.artifact, partialFile) { completed, total ->
+                generateArtifact(request.artifact, request.pdfQuality, partialFile) { completed, total ->
                     require(total > 0 && completed in 0..total) { "Invalid export progress" }
                     sendProgress(queued.id, ExportPhase.GENERATING, completed, total)
                 }
@@ -236,14 +250,25 @@ class ExportEngine(
 
     private suspend fun generateArtifact(
         artifact: ExportArtifact,
+        pdfQuality: ExportPdfQuality,
         outputFile: File,
         reportProgress: suspend (completedUnits: Int, totalUnits: Int) -> Unit,
     ) {
         when (artifact) {
             is ExportArtifact.SearchablePdf ->
-                generatePdf(artifact.input, PdfMode.SEARCHABLE, outputFile, reportProgress)
+                generatePdf(
+                    artifact.input.copy(pdfQuality = pdfQuality),
+                    PdfMode.SEARCHABLE,
+                    outputFile,
+                    reportProgress,
+                )
             is ExportArtifact.ImagePdf ->
-                generatePdf(artifact.input, PdfMode.IMAGE_ONLY, outputFile, reportProgress)
+                generatePdf(
+                    artifact.input.copy(pdfQuality = pdfQuality),
+                    PdfMode.IMAGE_ONLY,
+                    outputFile,
+                    reportProgress,
+                )
             else -> artifactGenerator.generate(artifact, outputFile, reportProgress)
         }
     }

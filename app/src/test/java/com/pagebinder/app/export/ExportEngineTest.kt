@@ -2,6 +2,9 @@ package com.pagebinder.app.export
 
 import com.pagebinder.app.domain.CompletedExportSource
 import com.pagebinder.app.domain.ExportDestination
+import com.pagebinder.app.domain.ExportOptions
+import com.pagebinder.app.domain.ExportPageRange
+import com.pagebinder.app.domain.ExportPdfQuality
 import com.pagebinder.app.domain.ExportRecord
 import com.pagebinder.app.domain.ExportRecordRepository
 import com.pagebinder.app.domain.ExportState
@@ -136,11 +139,15 @@ class ExportEngineTest {
         runTest {
             val cases =
                 listOf(
-                    PdfMode.SEARCHABLE to { input: PdfInput -> ExportArtifact.SearchablePdf(input) },
-                    PdfMode.IMAGE_ONLY to { input: PdfInput -> ExportArtifact.ImagePdf(input) },
+                    Triple(PdfMode.SEARCHABLE, ExportPdfQuality.HIGH) { input: PdfInput ->
+                        ExportArtifact.SearchablePdf(input)
+                    },
+                    Triple(PdfMode.IMAGE_ONLY, ExportPdfQuality.COMPACT) { input: PdfInput ->
+                        ExportArtifact.ImagePdf(input)
+                    },
                 )
 
-            cases.forEachIndexed { index, (expectedMode, artifact) ->
+            cases.forEachIndexed { index, (expectedMode, expectedQuality, artifact) ->
                 val cache = temporaryFolder.newFolder("exports-cache-pdf-$index")
                 val repository = InMemoryExportRecordRepository()
                 val gateway = RecordingPdfGateway()
@@ -158,8 +165,19 @@ class ExportEngineTest {
                 val events =
                     engine.export(
                         ExportRequest(
-                            projectId,
-                            ExportDestination("content://provider/document/redacted"),
+                            ExportOptions(
+                                projectId = projectId,
+                                type =
+                                    if (expectedMode == PdfMode.SEARCHABLE) {
+                                        ExportType.SEARCHABLE_PDF
+                                    } else {
+                                        ExportType.IMAGE_PDF
+                                    },
+                                fileName = "book.pdf",
+                                pageRange = ExportPageRange.All,
+                                pdfQuality = expectedQuality,
+                                destination = ExportDestination("content://provider/document/redacted"),
+                            ),
                             artifact(input),
                         ),
                     ).toList()
@@ -168,6 +186,7 @@ class ExportEngineTest {
                         .filter { it.phase == ExportPhase.GENERATING }
 
                 assertEquals(expectedMode, gateway.mode)
+                assertEquals(expectedQuality, gateway.pdfQuality)
                 assertEquals(listOf(1, 2, 3), gateway.sequences)
                 assertEquals("pdf-$expectedMode", storage.content)
                 assertEquals(listOf(0, 1, 2, 3), generating.map { it.completedUnits })
@@ -444,6 +463,8 @@ class ExportEngineTest {
     private class RecordingPdfGateway : PdfGateway {
         var mode: PdfMode? = null
             private set
+        var pdfQuality: ExportPdfQuality? = null
+            private set
         var sequences: List<Int> = emptyList()
             private set
 
@@ -454,6 +475,7 @@ class ExportEngineTest {
             reportProgress: suspend (completedPages: Int, totalPages: Int) -> Unit,
         ) {
             this.mode = mode
+            pdfQuality = input.pdfQuality
             sequences = input.pages.map(PdfPage::sequence)
             reportProgress(0, input.pages.size)
             input.pages.forEachIndexed { index, _ -> reportProgress(index + 1, input.pages.size) }

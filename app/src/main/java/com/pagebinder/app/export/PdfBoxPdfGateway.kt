@@ -3,6 +3,7 @@ package com.pagebinder.app.export
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import com.pagebinder.app.domain.ExportPdfQuality
 import com.pagebinder.app.domain.PdfGateway
 import com.pagebinder.app.domain.PdfInput
 import com.pagebinder.app.domain.PdfMode
@@ -15,6 +16,7 @@ import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.common.PDStream
 import com.tom_roush.pdfbox.pdmodel.font.PDType0Font
+import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
 import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
 import com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode
 import com.tom_roush.pdfbox.util.Matrix
@@ -51,7 +53,14 @@ class PdfBoxPdfGateway(
 
         val intermediate = File.createTempFile(TEMP_FILE_PREFIX, TEMP_FILE_SUFFIX, applicationContext.cacheDir)
         try {
-            val toUnicodeCMap = createIntermediateDocument(pages, mode, intermediate, reportProgress)
+            val toUnicodeCMap =
+                createIntermediateDocument(
+                    pages,
+                    input.pdfQuality,
+                    mode,
+                    intermediate,
+                    reportProgress,
+                )
             currentCoroutineContext().ensureActive()
             writeCompletedDocument(intermediate, toUnicodeCMap, output)
             currentCoroutineContext().ensureActive()
@@ -64,6 +73,7 @@ class PdfBoxPdfGateway(
 
     private suspend fun createIntermediateDocument(
         pages: List<PdfPage>,
+        pdfQuality: ExportPdfQuality,
         mode: PdfMode,
         intermediate: File,
         reportProgress: suspend (completedPages: Int, totalPages: Int) -> Unit,
@@ -92,14 +102,19 @@ class PdfBoxPdfGateway(
                             ),
                         )
                     document.addPage(page)
-                    val image = LosslessFactory.createFromImage(document, bitmap)
-                    PDPageContentStream(document, page).use { stream ->
-                        stream.drawImage(image, 0f, 0f, transformer.pageSize.width, transformer.pageSize.height)
-                        if (font != null) {
-                            val placements = pageInput.textPlacements(transformer)
-                            stream.drawInvisibleText(font, placements)
-                            placements.forEach { mappedText.append(it.text) }
+                    val displayBitmap = bitmap.resizedFor(pdfQuality)
+                    try {
+                        val image = document.createDisplayImage(displayBitmap, pdfQuality)
+                        PDPageContentStream(document, page).use { stream ->
+                            stream.drawImage(image, 0f, 0f, transformer.pageSize.width, transformer.pageSize.height)
+                            if (font != null) {
+                                val placements = pageInput.textPlacements(transformer)
+                                stream.drawInvisibleText(font, placements)
+                                placements.forEach { mappedText.append(it.text) }
+                            }
                         }
+                    } finally {
+                        if (displayBitmap !== bitmap) displayBitmap.recycle()
                     }
                 } finally {
                     bitmap.recycle()
@@ -135,6 +150,38 @@ class PdfBoxPdfGateway(
         image.openInputStream().use { input ->
             requireNotNull(BitmapFactory.decodeStream(input)) { "Page image could not be decoded" }
         }
+
+    /** Applies §3.6 only to the visible image layer; it never enlarges an image. */
+    private fun Bitmap.resizedFor(quality: ExportPdfQuality): Bitmap {
+        val maximumLongEdge = quality.maximumLongEdge
+        val longEdge = maxOf(width, height)
+        if (longEdge <= maximumLongEdge) return this
+
+        val scale = maximumLongEdge.toFloat() / longEdge
+        return Bitmap.createScaledBitmap(
+            this,
+            (width * scale).toInt().coerceAtLeast(1),
+            (height * scale).toInt().coerceAtLeast(1),
+            true,
+        )
+    }
+
+    private fun PDDocument.createDisplayImage(
+        bitmap: Bitmap,
+        quality: ExportPdfQuality,
+    ) = when (quality) {
+        ExportPdfQuality.HIGH -> LosslessFactory.createFromImage(this, bitmap)
+        ExportPdfQuality.STANDARD -> JPEGFactory.createFromImage(this, bitmap, STANDARD_JPEG_QUALITY)
+        ExportPdfQuality.COMPACT -> JPEGFactory.createFromImage(this, bitmap, COMPACT_JPEG_QUALITY)
+    }
+
+    private val ExportPdfQuality.maximumLongEdge: Int
+        get() =
+            when (this) {
+                ExportPdfQuality.HIGH -> HIGH_MAX_LONG_EDGE
+                ExportPdfQuality.STANDARD -> STANDARD_MAX_LONG_EDGE
+                ExportPdfQuality.COMPACT -> COMPACT_MAX_LONG_EDGE
+            }
 
     private fun PdfPage.textPlacements(transformer: PdfCoordinateTransformer): List<PdfTextPlacement> {
         val original =
@@ -276,5 +323,10 @@ class PdfBoxPdfGateway(
         const val FONT_UNITS_PER_EM = 1_000f
         const val PERCENT = 100f
         const val MAX_CMAP_ENTRIES_PER_BLOCK = 100
+        const val HIGH_MAX_LONG_EDGE = 3_840
+        const val STANDARD_MAX_LONG_EDGE = 2_048
+        const val COMPACT_MAX_LONG_EDGE = 1_280
+        const val STANDARD_JPEG_QUALITY = 0.85f
+        const val COMPACT_JPEG_QUALITY = 0.65f
     }
 }
