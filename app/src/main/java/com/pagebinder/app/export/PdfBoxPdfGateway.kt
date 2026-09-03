@@ -88,12 +88,7 @@ class PdfBoxPdfGateway(
                 val bitmap = pageInput.decodeBitmap()
                 try {
                     val transformer =
-                        PdfCoordinateTransformer.create(
-                            sourceWidth = bitmap.width,
-                            sourceHeight = bitmap.height,
-                            rotationDegrees = 0,
-                            pageWidth = bitmap.width.toFloat(),
-                        )
+                        pageInput.transform.toCoordinateTransformer(bitmap.width)
                     val page =
                         PDPage(
                             PDRectangle(
@@ -108,7 +103,7 @@ class PdfBoxPdfGateway(
                         PDPageContentStream(document, page).use { stream ->
                             stream.drawImage(image, 0f, 0f, transformer.pageSize.width, transformer.pageSize.height)
                             if (font != null) {
-                                val placements = pageInput.textPlacements(transformer)
+                                val placements = PdfTextLayer.placements(pageInput, transformer)
                                 stream.drawInvisibleText(font, placements)
                                 placements.forEach { mappedText.append(it.text) }
                             }
@@ -182,48 +177,6 @@ class PdfBoxPdfGateway(
                 ExportPdfQuality.STANDARD -> STANDARD_MAX_LONG_EDGE
                 ExportPdfQuality.COMPACT -> COMPACT_MAX_LONG_EDGE
             }
-
-    private fun PdfPage.textPlacements(transformer: PdfCoordinateTransformer): List<PdfTextPlacement> {
-        val original =
-            ocrBlocksJson
-                ?.let(PdfOcrBlocksJsonParser::parse)
-                ?.let(transformer::createTextPlacements)
-                .orEmpty()
-        val selectedText = editedText ?: if (original.isEmpty()) fullText else null
-        if (selectedText == null) return original
-        if (selectedText.isEmpty()) return emptyList()
-
-        val correctedLines = selectedText.lineSequence().filter(String::isNotEmpty).toList()
-        if (correctedLines.size == original.size) {
-            return correctedLines.zip(original) { text, placement -> placement.copy(text = text) }
-        }
-        val bounds =
-            original.coveringBounds()
-                ?: PdfRect(0f, 0f, transformer.pageSize.width, transformer.pageSize.height)
-        return correctedLines.distributeWithin(bounds)
-    }
-
-    private fun List<PdfTextPlacement>.coveringBounds(): PdfRect? =
-        takeIf(List<PdfTextPlacement>::isNotEmpty)?.let { placements ->
-            PdfRect(
-                left = placements.minOf { it.bounds.left },
-                bottom = placements.minOf { it.bounds.bottom },
-                right = placements.maxOf { it.bounds.right },
-                top = placements.maxOf { it.bounds.top },
-            )
-        }
-
-    private fun List<String>.distributeWithin(bounds: PdfRect): List<PdfTextPlacement> {
-        if (isEmpty()) return emptyList()
-        val lineHeight = bounds.height / size
-        return mapIndexed { index, text ->
-            val top = bounds.top - index * lineHeight
-            PdfTextPlacement(
-                text = text,
-                bounds = PdfRect(bounds.left, top - lineHeight, bounds.right, top),
-            )
-        }
-    }
 
     private fun PDPageContentStream.drawInvisibleText(
         font: PDType0Font,

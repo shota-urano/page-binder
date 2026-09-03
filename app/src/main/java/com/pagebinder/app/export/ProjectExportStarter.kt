@@ -19,6 +19,7 @@ import com.pagebinder.app.domain.PdfGateway
 import com.pagebinder.app.domain.PdfImageSource
 import com.pagebinder.app.domain.PdfInput
 import com.pagebinder.app.domain.PdfPage
+import com.pagebinder.app.domain.PdfPageTransform
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
@@ -105,9 +106,8 @@ class ProjectExportStarter(
     /**
      * 画像PDFはテキスト層に依存しないので OCR を読まない（docs/specs/11-export.md §3.1）。
      *
-     * blocksJson の座標は元画像基準（docs/specs/02-data-model.md §3.4）で、PDF へ渡すのは回転・切り取り後の
-     * 派生画像なので、非破壊編集のあるページでは座標が対応しない。そのページには blocksJson を渡さず、
-     * editedText / fullText だけを渡して PDF 側にページ内へ配置させる。
+     * blocksJson の座標は元画像基準（docs/specs/02-data-model.md §3.4）。元画像寸法と回転・切り取りも
+     * [PdfPageTransform] で渡し、PDF側で派生画像と同じ変換行列を適用する（docs/specs/10-searchable-pdf.md §3.2）。
      */
     private suspend fun pdfInput(
         pages: List<Page>,
@@ -119,7 +119,14 @@ class ProjectExportStarter(
                 PdfPage(
                     sequence = page.sequence,
                     image = PdfImageSource { pageImageSource.openEdited(page) },
-                    ocrBlocksJson = if (page.transformed) null else ocr?.blocksJson,
+                    transform =
+                        PdfPageTransform(
+                            sourceWidth = page.width,
+                            sourceHeight = page.height,
+                            rotationDegrees = page.rotation,
+                            crop = page.crop,
+                        ),
+                    ocrBlocksJson = ocr?.blocksJson,
                     fullText = ocr?.fullText,
                     editedText = ocr?.editedText,
                 )

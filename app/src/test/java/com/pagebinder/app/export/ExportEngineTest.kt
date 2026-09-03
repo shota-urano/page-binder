@@ -16,6 +16,7 @@ import com.pagebinder.app.domain.PdfImageSource
 import com.pagebinder.app.domain.PdfInput
 import com.pagebinder.app.domain.PdfMode
 import com.pagebinder.app.domain.PdfPage
+import com.pagebinder.app.domain.PdfPageTransform
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
@@ -379,6 +380,7 @@ class ExportEngineTest {
                 PdfPage(
                     sequence = sequence,
                     image = PdfImageSource { ByteArrayInputStream(byteArrayOf(sequence.toByte())) },
+                    transform = PdfPageTransform(sourceWidth = 1, sourceHeight = 1),
                     ocrBlocksJson = "[]",
                     fullText = "page $sequence",
                     editedText = null,
