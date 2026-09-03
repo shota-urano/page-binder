@@ -13,17 +13,18 @@
         <activity
             android:name=".spike.saf.SafPickerSpikeActivity"
             android:exported="false" />
-        <!-- debug 専用の書き出し画面プレビュー（実機での目視・スクリーンショット用） -->
+        <!--
+          debug 専用の書き出し画面プレビュー。ランチャーには出さず `adb shell am start` で開く。
+          LAUNCHER を付けるとアプリの入口が2つになり、MediaProjection の「1つのアプリ」共有先を
+          PageBinder にしたときにこちらが起動して書き出しプレビューが前面に出る
+          （pagebinder-fu6 の実機検証で書籍詳細に戻れない誤検証の原因になった）。
+          他のプレビューと同じ扱いに揃える
+        -->
         <activity
             android:name=".preview.ExportScreenPreviewActivity"
             android:exported="true"
             android:label="@string/export_preview_label"
-            android:theme="@style/Theme.PageBinder">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:theme="@style/Theme.PageBinder" />
         <!-- debug 専用のページ一覧プレビュー。ランチャーには出さず `adb shell am start` で開く -->
         <activity
             android:name=".preview.PageListScreenPreviewActivity"
