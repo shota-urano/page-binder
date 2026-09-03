@@ -24,6 +24,8 @@ data class PdfPage(
 
 data class PdfInput(
     val pages: List<PdfPage>,
+    /** Display-layer quality. OCR text coordinates are independent of this setting. */
+    val pdfQuality: ExportPdfQuality = ExportPdfQuality.STANDARD,
 )
 
 /**
