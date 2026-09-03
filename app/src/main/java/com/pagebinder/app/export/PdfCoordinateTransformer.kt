@@ -1,5 +1,6 @@
 package com.pagebinder.app.export
 
+import com.pagebinder.app.domain.PdfPageTransform
 import com.pagebinder.app.image.ImageAffineMatrix
 import com.pagebinder.app.image.ImageCoordinateTransformer
 
@@ -219,3 +220,25 @@ internal class PdfCoordinateTransformer private constructor(
 }
 
 private fun ImageAffineMatrix.toPdfMatrix() = PdfAffineMatrix(a, b, c, d, tx, ty)
+
+/**
+ * Builds the matrix shared by the drawn raster and the OCR text layer (10-searchable-pdf §3.2).
+ *
+ * [editedImageWidth] is the pixel width of the already rotated/cropped derivative that gets drawn,
+ * so the page keeps that derivative's ratio (10-searchable-pdf §3.5) while OCR rectangles still
+ * enter in original-image coordinates.
+ */
+internal fun PdfPageTransform.toCoordinateTransformer(editedImageWidth: Int): PdfCoordinateTransformer =
+    PdfCoordinateTransformer.create(
+        sourceWidth = sourceWidth,
+        sourceHeight = sourceHeight,
+        rotationDegrees = rotationDegrees,
+        crop =
+            NormalizedCrop(
+                left = crop.left,
+                top = crop.top,
+                right = crop.right,
+                bottom = crop.bottom,
+            ),
+        pageWidth = editedImageWidth.toFloat(),
+    )
