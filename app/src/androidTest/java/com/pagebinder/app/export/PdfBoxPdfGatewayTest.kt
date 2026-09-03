@@ -4,11 +4,13 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.pagebinder.app.domain.ExportPdfQuality
 import com.pagebinder.app.domain.PdfImageSource
 import com.pagebinder.app.domain.PdfInput
 import com.pagebinder.app.domain.PdfMode
 import com.pagebinder.app.domain.PdfPage
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -69,6 +71,34 @@ class PdfBoxPdfGatewayTest {
         }
 
     @Test
+    fun pdfQualityChangesDisplayImageResolutionWithoutChangingPageSize() =
+        runBlocking {
+            val generated =
+                ExportPdfQuality.entries.associateWith { quality ->
+                    val output = ByteArrayOutputStream()
+                    gateway.generate(
+                        input = PdfInput(listOf(page(1, null, image = largeImageBytes)), quality),
+                        mode = PdfMode.IMAGE_ONLY,
+                        output = output,
+                    ) { _, _ -> }
+                    inspectDisplayImage(output.toByteArray())
+                }
+
+            assertEquals(QUALITY_IMAGE_WIDTH, generated.getValue(ExportPdfQuality.HIGH).width)
+            assertEquals(QUALITY_IMAGE_HEIGHT, generated.getValue(ExportPdfQuality.HIGH).height)
+            assertEquals(2048, generated.getValue(ExportPdfQuality.STANDARD).width)
+            assertEquals(1152, generated.getValue(ExportPdfQuality.STANDARD).height)
+            assertEquals(1280, generated.getValue(ExportPdfQuality.COMPACT).width)
+            assertEquals(720, generated.getValue(ExportPdfQuality.COMPACT).height)
+            generated.values.forEach { image ->
+                assertEquals(
+                    listOf(QUALITY_IMAGE_WIDTH.toFloat(), QUALITY_IMAGE_HEIGHT.toFloat()),
+                    image.pageSize,
+                )
+            }
+        }
+
+    @Test
     fun searchablePdfUsesEditedTextWhenStructuredCoordinatesAreUnavailable() =
         runBlocking {
             val output = ByteArrayOutputStream()
@@ -118,14 +148,23 @@ class PdfBoxPdfGatewayTest {
         blocksJson: String?,
         fullText: String? = null,
         editedText: String? = null,
+        image: ByteArray = imageBytes,
     ): PdfPage =
         PdfPage(
             sequence = sequence,
-            image = PdfImageSource { ByteArrayInputStream(imageBytes) },
+            image = PdfImageSource { ByteArrayInputStream(image) },
             ocrBlocksJson = blocksJson,
             fullText = fullText,
             editedText = editedText,
         )
+
+    private fun inspectDisplayImage(pdf: ByteArray): ImageDimensions =
+        PDDocument.load(ByteArrayInputStream(pdf)).use { document ->
+            val page = document.getPage(0)
+            val imageName = page.resources.xObjectNames.iterator().next()
+            val image = page.resources.getXObject(imageName) as PDImageXObject
+            ImageDimensions(image.width, image.height, listOf(page.mediaBox.width, page.mediaBox.height))
+        }
 
     private fun validBlocksJson(text: String): String =
         """
@@ -167,9 +206,27 @@ class PdfBoxPdfGatewayTest {
         }
     }
 
+    private val largeImageBytes: ByteArray by lazy {
+        val bitmap = Bitmap.createBitmap(QUALITY_IMAGE_WIDTH, QUALITY_IMAGE_HEIGHT, Bitmap.Config.ARGB_8888)
+        bitmap.eraseColor(Color.WHITE)
+        ByteArrayOutputStream().use { output ->
+            assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+            bitmap.recycle()
+            output.toByteArray()
+        }
+    }
+
+    private data class ImageDimensions(
+        val width: Int,
+        val height: Int,
+        val pageSize: List<Float> = emptyList(),
+    )
+
     private companion object {
         const val IMAGE_WIDTH = 64
         const val IMAGE_HEIGHT = 96
+        const val QUALITY_IMAGE_WIDTH = 2560
+        const val QUALITY_IMAGE_HEIGHT = 1440
         const val SAMPLE_TEXT = "日本語検索テスト"
         const val TOLERANCE = 0.0001f
 

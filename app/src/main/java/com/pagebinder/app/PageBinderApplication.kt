@@ -15,6 +15,7 @@ import com.pagebinder.app.domain.CaptureOverlayGateway
 import com.pagebinder.app.domain.CaptureSessionCoordinator
 import com.pagebinder.app.domain.CaptureSessionLifecycle
 import com.pagebinder.app.domain.CaptureStopReason
+import com.pagebinder.app.domain.ExportStarter
 import com.pagebinder.app.domain.OcrImageSource
 import com.pagebinder.app.domain.OcrJobRepository
 import com.pagebinder.app.domain.OcrJobRunner
@@ -46,6 +47,9 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
     @Inject lateinit var pageRepository: PageRepository
 
     @Inject lateinit var imageStore: FileImageStore
+
+    /** 書き出し画面へ渡す本番の書き出し起動口（docs/specs/11-export.md §3.2） */
+    @Inject lateinit var exportStarter: ExportStarter
 
     val pageThumbnailLoader by lazy { FilePageThumbnailLoader(imageStore, pageRepository) }
     val ocrQueueScheduler by lazy { createOcrQueueScheduler() }
