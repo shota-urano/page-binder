@@ -88,6 +88,45 @@ class ImageCoordinateTransformerTest {
         assertEquals(140f, transformer.croppedSize.height, TOLERANCE)
     }
 
+    @Test
+    fun `encloses non integer crop edges with the derivative pixel bounds`() {
+        assertPixelCrop(
+            cropLeft = 0.123f,
+            cropRight = 0.876f,
+            expected = ImagePixelRect(left = 12, top = 0, right = 88, bottom = 100),
+        )
+        assertPixelCrop(
+            cropLeft = 0.53f,
+            cropRight = 1f,
+            expected = ImagePixelRect(left = 53, top = 0, right = 100, bottom = 100),
+        )
+        assertPixelCrop(
+            cropLeft = 0.129995f,
+            cropRight = 0.870005f,
+            expected = ImagePixelRect(left = 12, top = 0, right = 88, bottom = 100),
+        )
+    }
+
+    private fun assertPixelCrop(
+        cropLeft: Float,
+        cropRight: Float,
+        expected: ImagePixelRect,
+    ) {
+        val transformer =
+            ImageCoordinateTransformer.create(
+                sourceWidth = 100,
+                sourceHeight = 100,
+                rotationDegrees = 0,
+                cropLeft = cropLeft,
+                cropRight = cropRight,
+            )
+
+        assertEquals(expected, transformer.pixelCropBounds)
+        assertEquals(expected.width.toFloat(), transformer.pixelCroppedSize.width, TOLERANCE)
+        assertEquals(expected.height.toFloat(), transformer.pixelCroppedSize.height, TOLERANCE)
+        assertEquals(expected.left.toFloat(), transformer.pixelCroppedToSource.map(ImagePoint(0f, 0f)).x, TOLERANCE)
+    }
+
     private fun assertRoundTrip(
         rotationDegrees: Int,
         expectedRotated: ImagePoint,

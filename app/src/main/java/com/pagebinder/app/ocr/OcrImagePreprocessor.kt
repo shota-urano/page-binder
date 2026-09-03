@@ -8,12 +8,11 @@ import android.graphics.Rect
 import com.pagebinder.app.domain.OcrInput
 import com.pagebinder.app.domain.OcrInputException
 import com.pagebinder.app.image.ImageCoordinateTransformer
-import com.pagebinder.app.image.ImagePixelRect
 import com.pagebinder.app.image.ImagePoint
 import com.pagebinder.app.image.ImageRect
+import com.pagebinder.app.image.ImageSize
+import com.pagebinder.app.image.enclosingPixelBounds
 import java.io.IOException
-import kotlin.math.ceil
-import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -34,27 +33,11 @@ internal class OcrCoordinateMapper(
     private val originalHeight: Int,
     private val decodedWidth: Int,
     private val decodedHeight: Int,
-    private val rotationDegrees: Int,
-    private val cropLeft: Int,
-    private val cropTop: Int,
-    private val croppedWidth: Int,
-    private val croppedHeight: Int,
+    private val coordinates: ImageCoordinateTransformer,
     private val preparedWidth: Int,
     private val preparedHeight: Int,
 ) {
-    private val rotatedWidth = if (rotationDegrees % 180 == 0) decodedWidth else decodedHeight
-    private val rotatedHeight = if (rotationDegrees % 180 == 0) decodedHeight else decodedWidth
-
-    private val coordinates =
-        ImageCoordinateTransformer.create(
-            sourceWidth = decodedWidth,
-            sourceHeight = decodedHeight,
-            rotationDegrees = rotationDegrees,
-            cropLeft = cropLeft.toFloat() / rotatedWidth,
-            cropTop = cropTop.toFloat() / rotatedHeight,
-            cropRight = (cropLeft + croppedWidth).toFloat() / rotatedWidth,
-            cropBottom = (cropTop + croppedHeight).toFloat() / rotatedHeight,
-        )
+    private val pixelCropBounds = coordinates.pixelCropBounds
 
     fun toOriginal(rect: OcrPixelRect): OcrPixelRect {
         val corners =
@@ -64,20 +47,22 @@ internal class OcrCoordinateMapper(
                 toOriginal(OcrPoint(rect.right.toFloat(), rect.bottom.toFloat())),
                 toOriginal(OcrPoint(rect.left.toFloat(), rect.bottom.toFloat())),
             )
-        return OcrPixelRect(
-            left = floor(corners.minOf(OcrPoint::x)).toInt().coerceIn(0, originalWidth),
-            top = floor(corners.minOf(OcrPoint::y)).toInt().coerceIn(0, originalHeight),
-            right = ceil(corners.maxOf(OcrPoint::x)).toInt().coerceIn(0, originalWidth),
-            bottom = ceil(corners.maxOf(OcrPoint::y)).toInt().coerceIn(0, originalHeight),
-        )
+        val bounds =
+            ImageRect(
+                left = corners.minOf(OcrPoint::x),
+                top = corners.minOf(OcrPoint::y),
+                right = corners.maxOf(OcrPoint::x),
+                bottom = corners.maxOf(OcrPoint::y),
+            ).enclosingPixelBounds(ImageSize(originalWidth.toFloat(), originalHeight.toFloat()))
+        return OcrPixelRect(bounds.left, bounds.top, bounds.right, bounds.bottom)
     }
 
     private fun toOriginal(point: OcrPoint): OcrPoint {
         val decoded =
-            coordinates.croppedToSource(
+            coordinates.pixelCroppedToSource.map(
                 ImagePoint(
-                    x = point.x * croppedWidth / preparedWidth,
-                    y = point.y * croppedHeight / preparedHeight,
+                    x = point.x * pixelCropBounds.width / preparedWidth,
+                    y = point.y * pixelCropBounds.height / preparedHeight,
                 ),
             )
         return OcrPoint(
@@ -134,7 +119,7 @@ internal object OcrImagePreprocessor {
                 cropRight = input.crop.right,
                 cropBottom = input.crop.bottom,
             )
-        val cropRect = coordinates.enclosingPixelCrop().toOcrRect()
+        val cropRect = coordinates.pixelCropBounds
         val sourceRegion =
             coordinates
                 .rotatedToSource(
@@ -144,10 +129,10 @@ internal object OcrImagePreprocessor {
                         cropRect.right.toFloat(),
                         cropRect.bottom.toFloat(),
                     ),
-                ).toAndroidRect(bounds.outWidth, bounds.outHeight)
+                ).toAndroidRect()
         val options =
             BitmapFactory.Options().apply {
-                inSampleSize = sampleSize(cropRect.right - cropRect.left, cropRect.bottom - cropRect.top)
+                inSampleSize = sampleSize(cropRect.width, cropRect.height)
             }
         val regionDecoder = BitmapRegionDecoder.newInstance(encoded, 0, encoded.size, false)
         var current =
@@ -180,11 +165,7 @@ internal object OcrImagePreprocessor {
                         originalHeight = bounds.outHeight,
                         decodedWidth = bounds.outWidth,
                         decodedHeight = bounds.outHeight,
-                        rotationDegrees = input.rotationDegrees,
-                        cropLeft = cropRect.left,
-                        cropTop = cropRect.top,
-                        croppedWidth = cropRect.right - cropRect.left,
-                        croppedHeight = cropRect.bottom - cropRect.top,
+                        coordinates = coordinates,
                         preparedWidth = current.width,
                         preparedHeight = current.height,
                     ),
@@ -207,18 +188,8 @@ internal object OcrImagePreprocessor {
         return result
     }
 
-    private fun ImagePixelRect.toOcrRect() = OcrPixelRect(left, top, right, bottom)
-
-    private fun ImageRect.toAndroidRect(
-        sourceWidth: Int,
-        sourceHeight: Int,
-    ): Rect {
-        val pixelLeft = floor(left).toInt().coerceIn(0, sourceWidth - 1)
-        val pixelTop = floor(top).toInt().coerceIn(0, sourceHeight - 1)
-        val pixelRight = ceil(right).toInt().coerceIn(pixelLeft + 1, sourceWidth)
-        val pixelBottom = ceil(bottom).toInt().coerceIn(pixelTop + 1, sourceHeight)
-        return Rect(pixelLeft, pixelTop, pixelRight, pixelBottom)
-    }
+    /** Rotation maps integer crop edges to exact integer source edges. */
+    private fun ImageRect.toAndroidRect(): Rect = Rect(left.toInt(), top.toInt(), right.toInt(), bottom.toInt())
 
     private fun Bitmap.replaceWithRotated(degrees: Int): Bitmap {
         val replacement =
