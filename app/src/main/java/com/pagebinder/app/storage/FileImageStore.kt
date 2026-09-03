@@ -115,6 +115,22 @@ class FileImageStore(
         )
     }
 
+    /**
+     * Creates an export-only derivative under the project's `temp/` directory.
+     *
+     * The caller owns the returned file and must remove it after the consumer closes its stream.
+     * Original images remain exclusively under `images/` and are never modified.
+     */
+    fun createTemporaryDerivativeFile(
+        projectId: UUID,
+        prefix: String,
+        suffix: String,
+    ): File {
+        val directory = temporaryDirectory(projectId)
+        if (!directory.isDirectory) throw IOException("Project temp path is not a directory")
+        return File.createTempFile(prefix, suffix, directory)
+    }
+
     internal fun <T> saveOriginalAtomically(
         projectId: UUID,
         pageId: UUID,
