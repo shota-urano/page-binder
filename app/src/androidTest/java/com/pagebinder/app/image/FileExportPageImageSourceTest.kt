@@ -19,6 +19,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.io.InputStream
 import java.time.Instant
 import java.util.UUID
 
@@ -60,6 +61,39 @@ class FileExportPageImageSourceTest {
         assertTrue(temporaryDirectory.listFiles().isNullOrEmpty())
     }
 
+    @Test
+    fun retainsAtMostOneEncodedPageOfJavaHeapAcross100EditedExportReads() {
+        val page = page(rotation = 90)
+        val encodedPageBytes = writeNoisyOriginal(page)
+        assertTrue(
+            "The test page must be large enough to expose a full-buffer regression",
+            encodedPageBytes >= MIN_PAGE_BYTES,
+        )
+
+        val source = FileExportPageImageSource(imageStore)
+        val inputs = mutableListOf<InputStream>()
+        val baselineBytes = usedJavaHeapBytes()
+        try {
+            repeat(PAGE_COUNT) { inputs += source.openEdited(page) }
+
+            val retainedBytes = usedJavaHeapBytes() - baselineBytes
+            val maximumRetainedBytes = encodedPageBytes * MAXIMUM_RETAINED_PAGE_BUFFERS
+            assertTrue(
+                "100 edited export reads retained $retainedBytes Java-heap bytes; " +
+                    "the $maximumRetainedBytes-byte limit is two $encodedPageBytes-byte pages",
+                retainedBytes <= maximumRetainedBytes,
+            )
+
+            // All 100 real page payloads are present on disk, not as Java byte arrays retained by
+            // their InputStreams. This also guards the measurement's setup: a legacy in-memory
+            // ByteArrayInputStream implementation leaves this directory empty.
+            assertEquals(PAGE_COUNT, temporaryDerivativeFiles().size)
+        } finally {
+            inputs.forEach(InputStream::close)
+        }
+        assertTrue(temporaryDerivativeFiles().isEmpty())
+    }
+
     private fun writeOriginal(page: Page) {
         val bitmap = Bitmap.createBitmap(32, 24, Bitmap.Config.ARGB_8888)
         bitmap.eraseColor(Color.BLUE)
@@ -70,6 +104,43 @@ class FileExportPageImageSourceTest {
         } finally {
             bitmap.recycle()
         }
+    }
+
+    private fun writeNoisyOriginal(page: Page): Long {
+        val pixels = IntArray(MEMORY_TEST_IMAGE_WIDTH * MEMORY_TEST_IMAGE_HEIGHT)
+        var state = 0x13579bdf
+        pixels.indices.forEach { index ->
+            state = state * 1_103_515_245 + 12_345
+            pixels[index] = Color.rgb(state ushr 16, state ushr 8, state)
+        }
+        val bitmap =
+            Bitmap.createBitmap(
+                pixels,
+                MEMORY_TEST_IMAGE_WIDTH,
+                MEMORY_TEST_IMAGE_HEIGHT,
+                Bitmap.Config.ARGB_8888,
+            )
+        try {
+            imageStore.resolve(page.originalImagePath).outputStream().use { output ->
+                BitmapImageCodec.write(bitmap, BitmapImageFormat.WEBP_LOSSLESS, output)
+            }
+        } finally {
+            bitmap.recycle()
+        }
+        return imageStore.resolve(page.originalImagePath).length()
+    }
+
+    private fun temporaryDerivativeFiles(): List<File> =
+        filesDirectory.resolve("projects/$projectId/temp")
+            .listFiles { file -> file.name.startsWith("export-page-") && file.name.endsWith(".webp") }
+            .orEmpty()
+            .toList()
+
+    private fun usedJavaHeapBytes(): Long {
+        Runtime.getRuntime().gc()
+        Runtime.getRuntime().runFinalization()
+        val runtime = Runtime.getRuntime()
+        return runtime.totalMemory() - runtime.freeMemory()
     }
 
     private fun page(rotation: Int) =
@@ -90,6 +161,12 @@ class FileExportPageImageSourceTest {
         )
 
     private companion object {
+        const val PAGE_COUNT = 100
+        const val MEMORY_TEST_IMAGE_WIDTH = 256
+        const val MEMORY_TEST_IMAGE_HEIGHT = 256
+        const val MIN_PAGE_BYTES = 128 * 1024L
+        const val MAXIMUM_RETAINED_PAGE_BUFFERS = 2L
+
         val context
             get() = InstrumentationRegistry.getInstrumentation().targetContext
     }

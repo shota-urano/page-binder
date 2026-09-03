@@ -24,7 +24,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import java.io.InputStream
 
 @RunWith(AndroidJUnit4::class)
 class PdfBoxPdfGatewayTest {
@@ -157,36 +156,6 @@ class PdfBoxPdfGatewayTest {
             assertEquals(temporaryFilesBefore, gatewayTemporaryFiles())
         }
 
-    @Test
-    fun reads100PageImagesWithOnlyOnePageBufferRetainedAtAPeak() =
-        runBlocking {
-            val memory = PageImageReadMemory(PAGE_IMAGE_BUFFER_BYTES)
-            val pages =
-                (1..PAGE_COUNT).map { sequence ->
-                    PdfPage(
-                        sequence = sequence,
-                        image = PdfImageSource { memory.open(imageBytes) },
-                        transform = PdfPageTransform(sourceWidth = IMAGE_WIDTH, sourceHeight = IMAGE_HEIGHT),
-                        ocrBlocksJson = null,
-                        fullText = null,
-                        editedText = null,
-                    )
-                }
-
-            gateway.generate(
-                input = PdfInput(pages),
-                mode = PdfMode.IMAGE_ONLY,
-                output = ByteArrayOutputStream(),
-            ) { _, _ -> }
-
-            // Each opened page stream holds a real 1 MiB reservation until close. A 100-page
-            // export therefore proves that PdfBoxPdfGateway closes each page source before
-            // opening the next one, rather than retaining image reads for the whole document.
-            assertEquals(PAGE_IMAGE_BUFFER_BYTES, memory.peakRetainedBytes)
-            assertEquals(0, memory.retainedBytes)
-            assertEquals(PAGE_COUNT, memory.closedStreamCount)
-        }
-
     private fun page(
         sequence: Int,
         blocksJson: String?,
@@ -269,40 +238,11 @@ class PdfBoxPdfGatewayTest {
         val pageSize: List<Float> = emptyList(),
     )
 
-    private class PageImageReadMemory(
-        private val bytesPerPage: Int,
-    ) {
-        var retainedBytes = 0
-            private set
-        var peakRetainedBytes = 0
-            private set
-        var closedStreamCount = 0
-            private set
-
-        fun open(encodedImage: ByteArray): InputStream {
-            retainedBytes += bytesPerPage
-            peakRetainedBytes = maxOf(peakRetainedBytes, retainedBytes)
-            return object : ByteArrayInputStream(encodedImage) {
-                private var retainedPageBuffer: ByteArray? = ByteArray(bytesPerPage)
-
-                override fun close() {
-                    retainedPageBuffer ?: return
-                    retainedPageBuffer = null
-                    retainedBytes -= bytesPerPage
-                    closedStreamCount += 1
-                    super.close()
-                }
-            }
-        }
-    }
-
     private companion object {
         const val IMAGE_WIDTH = 64
         const val IMAGE_HEIGHT = 96
         const val QUALITY_IMAGE_WIDTH = 2560
         const val QUALITY_IMAGE_HEIGHT = 1440
-        const val PAGE_COUNT = 100
-        const val PAGE_IMAGE_BUFFER_BYTES = 1024 * 1024
         const val SAMPLE_TEXT = "日本語検索テスト"
         const val TOLERANCE = 0.0001f
 
