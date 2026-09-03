@@ -25,7 +25,7 @@ object BitmapImageTransformer {
         var derivative: Bitmap? = null
         try {
             derivative = source.rotatedCopy(rotationDegrees)
-            val bounds = coordinates.enclosingPixelCrop()
+            val bounds = coordinates.pixelCropBounds
             if (
                 bounds.left == 0 &&
                 bounds.top == 0 &&

@@ -196,8 +196,9 @@ internal class PdfCoordinateTransformer private constructor(
                     cropRight = crop.right,
                     cropBottom = crop.bottom,
                 )
-            val croppedWidth = imageTransform.croppedSize.width
-            val croppedHeight = imageTransform.croppedSize.height
+            // Keep the OCR matrix aligned with the integer-bounded bitmap derivative.
+            val croppedWidth = imageTransform.pixelCroppedSize.width
+            val croppedHeight = imageTransform.pixelCroppedSize.height
             val scale = pageWidth / croppedWidth
             val pageSize = PdfPageSize(pageWidth, croppedHeight * scale)
 
@@ -210,7 +211,7 @@ internal class PdfCoordinateTransformer private constructor(
                     tx = 0f,
                     ty = pageSize.height,
                 )
-            val sourceToPdf = imageTransform.sourceToCropped.toPdfMatrix().then(croppedToPdf)
+            val sourceToPdf = imageTransform.sourceToPixelCropped.toPdfMatrix().then(croppedToPdf)
 
             return PdfCoordinateTransformer(pageSize, sourceToPdf)
         }

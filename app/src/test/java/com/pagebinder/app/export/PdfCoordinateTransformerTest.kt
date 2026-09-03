@@ -70,6 +70,18 @@ class PdfCoordinateTransformerTest {
     }
 
     @Test
+    fun `maps OCR edges with the same integer crop bounds as the bitmap derivative`() {
+        assertPixelCropMapsToPdf(cropLeft = 0.123f, cropRight = 0.876f, sourceLeft = 12f, sourceRight = 88f)
+        assertPixelCropMapsToPdf(cropLeft = 0.53f, cropRight = 1f, sourceLeft = 53f, sourceRight = 100f)
+        assertPixelCropMapsToPdf(
+            cropLeft = 0.129995f,
+            cropRight = 0.870005f,
+            sourceLeft = 12f,
+            sourceRight = 88f,
+        )
+    }
+
+    @Test
     fun `creates element placements and falls back to line or block placement`() {
         val transformer = create(rotation = 0)
         val blocks =
@@ -134,6 +146,29 @@ class PdfCoordinateTransformerTest {
     ) {
         assertEquals(width, actual.width, TOLERANCE)
         assertEquals(height, actual.height, TOLERANCE)
+    }
+
+    private fun assertPixelCropMapsToPdf(
+        cropLeft: Float,
+        cropRight: Float,
+        sourceLeft: Float,
+        sourceRight: Float,
+    ) {
+        val derivativeWidth = sourceRight - sourceLeft
+        val transformer =
+            PdfCoordinateTransformer.create(
+                sourceWidth = 100,
+                sourceHeight = 100,
+                rotationDegrees = 0,
+                crop = NormalizedCrop(left = cropLeft, right = cropRight),
+                pageWidth = derivativeWidth,
+            )
+
+        assertRect(
+            expected = PdfRect(left = 0f, bottom = 0f, right = derivativeWidth, top = 100f),
+            actual = transformer.map(OcrRect(sourceLeft, 0f, sourceRight, 100f)),
+        )
+        assertSize(width = derivativeWidth, height = 100f, actual = transformer.pageSize)
     }
 
     companion object {

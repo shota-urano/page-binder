@@ -1,7 +1,9 @@
 package com.pagebinder.app.image
 
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.roundToInt
 
 /** A framework-independent point in image coordinates whose origin is at the top left. */
 data class ImagePoint(
@@ -49,6 +51,9 @@ data class ImagePixelRect(
     init {
         require(left < right && top < bottom) { "Image pixel rectangle must have a positive area" }
     }
+
+    val width: Int get() = right - left
+    val height: Int get() = bottom - top
 }
 
 /** Affine matrix using x' = ax + cy + tx and y' = bx + dy + ty. */
@@ -95,8 +100,13 @@ data class ImageAffineMatrix(
  * The shared definition of PageBinder's non-destructive image coordinates.
  *
  * Clockwise rotation is applied first. Crop bounds are then interpreted as normalized coordinates
- * of that rotated image. [sourceToCropped] and [croppedToSource] are exact inverses, so display,
- * OCR, and PDF generation can use the same transformation definition.
+ * of that rotated image. [sourceToCropped] and [croppedToSource] are exact inverses for the
+ * continuous normalized crop.
+ *
+ * Actual bitmap derivatives can only use integer edges. [pixelCropBounds] is the single source
+ * of truth for converting the normalized crop to those edges: it encloses the continuous crop
+ * with floor/ceil rounding. Display, OCR, and PDF generation must use
+ * [sourceToPixelCropped] / [pixelCroppedToSource] when they refer to the generated derivative.
  */
 class ImageCoordinateTransformer private constructor(
     val sourceSize: ImageSize,
@@ -108,6 +118,38 @@ class ImageCoordinateTransformer private constructor(
     val croppedToSource: ImageAffineMatrix,
 ) {
     val croppedSize = ImageSize(cropBounds.right - cropBounds.left, cropBounds.bottom - cropBounds.top)
+
+    /**
+     * Integer bounds of the bitmap derivative; right and bottom are exclusive.
+     *
+     * This is deliberately the only definition of crop-edge rounding. Values within two ULPs of
+     * an integer are first snapped to that integer, which removes multiplication representation
+     * noise without changing valid non-integer crop edges.
+     */
+    val pixelCropBounds: ImagePixelRect = cropBounds.enclosingPixelBounds(rotatedSize)
+
+    /** Pixel dimensions of the derivative cropped with [pixelCropBounds]. */
+    val pixelCroppedSize =
+        ImageSize(
+            width = (pixelCropBounds.right - pixelCropBounds.left).toFloat(),
+            height = (pixelCropBounds.bottom - pixelCropBounds.top).toFloat(),
+        )
+
+    /** Maps source coordinates to the actual integer-bounded bitmap derivative. */
+    val sourceToPixelCropped: ImageAffineMatrix =
+        sourceToRotated.then(
+            ImageAffineMatrix(
+                a = 1f,
+                b = 0f,
+                c = 0f,
+                d = 1f,
+                tx = -pixelCropBounds.left.toFloat(),
+                ty = -pixelCropBounds.top.toFloat(),
+            ),
+        )
+
+    /** Inverse of [sourceToPixelCropped]. */
+    val pixelCroppedToSource: ImageAffineMatrix = sourceToPixelCropped.inverse()
 
     fun sourceToCropped(point: ImagePoint): ImagePoint = sourceToCropped.map(point)
 
@@ -122,17 +164,6 @@ class ImageCoordinateTransformer private constructor(
     fun croppedToSource(rect: ImageRect): ImageRect = croppedToSource.mapBounds(rect)
 
     fun rotatedToSource(rect: ImageRect): ImageRect = rotatedToSource.mapBounds(rect)
-
-    /** Pixel crop bounds that contain the complete normalized crop without losing edge pixels. */
-    fun enclosingPixelCrop(): ImagePixelRect {
-        val width = rotatedSize.width.toInt()
-        val height = rotatedSize.height.toInt()
-        val left = floor(cropBounds.left).toInt().coerceIn(0, width - 1)
-        val top = floor(cropBounds.top).toInt().coerceIn(0, height - 1)
-        val right = ceil(cropBounds.right).toInt().coerceIn(left + 1, width)
-        val bottom = ceil(cropBounds.bottom).toInt().coerceIn(top + 1, height)
-        return ImagePixelRect(left, top, right, bottom)
-    }
 
     companion object {
         fun create(
@@ -214,4 +245,25 @@ private fun ImageAffineMatrix.mapBounds(rect: ImageRect): ImageRect {
         right = corners.maxOf(ImagePoint::x),
         bottom = corners.maxOf(ImagePoint::y),
     )
+}
+
+/**
+ * The sole float-rectangle to pixel-boundary rounding rule. In particular, this defines the
+ * normalized crop edges used by every bitmap derivative.
+ */
+internal fun ImageRect.enclosingPixelBounds(size: ImageSize): ImagePixelRect {
+    val width = size.width.toInt()
+    val height = size.height.toInt()
+    val left = floor(snapPixelEdge(left)).toInt().coerceIn(0, width - 1)
+    val top = floor(snapPixelEdge(top)).toInt().coerceIn(0, height - 1)
+    val right = ceil(snapPixelEdge(right)).toInt().coerceIn(left + 1, width)
+    val bottom = ceil(snapPixelEdge(bottom)).toInt().coerceIn(top + 1, height)
+    return ImagePixelRect(left, top, right, bottom)
+}
+
+/** Snaps only representational error, not meaningful sub-pixel crop edges. */
+private fun snapPixelEdge(value: Float): Float {
+    val nearestInteger = value.roundToInt().toFloat()
+    val tolerance = maxOf(Math.ulp(value), Math.ulp(nearestInteger)) * 2f
+    return if (abs(value - nearestInteger) <= tolerance) nearestInteger else value
 }
