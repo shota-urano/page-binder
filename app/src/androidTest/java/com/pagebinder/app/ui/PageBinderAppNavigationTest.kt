@@ -4,6 +4,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -23,6 +25,7 @@ import com.pagebinder.app.domain.BookProjectSummary
 import com.pagebinder.app.domain.CaptureFeedbackSettings
 import com.pagebinder.app.domain.CaptureFeedbackSettingsRepository
 import com.pagebinder.app.domain.ExportStarter
+import com.pagebinder.app.domain.ExportType
 import com.pagebinder.app.domain.Page
 import com.pagebinder.app.domain.PageCrop
 import com.pagebinder.app.domain.PageCropScope
@@ -175,6 +178,50 @@ class PageBinderAppNavigationTest {
         awaitText(R.string.page_list_title)
     }
 
+    @Test
+    fun `未完了の書き出しが無ければ書籍詳細に再試行の導線は出ない`() {
+        showApp(pageCount = 2)
+        openBookDetail()
+
+        composeTestRule
+            .onNodeWithText(string(R.string.book_detail_interrupted_export_action))
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun `未完了の書き出しがあると書籍詳細に件数付きの提示と再試行が出る`() {
+        showApp(pageCount = 2, interruptedExports = listOf(ExportType.MARKDOWN))
+        openBookDetail()
+
+        awaitText(R.string.book_detail_interrupted_export_action)
+        composeTestRule
+            .onNodeWithText(context.getString(R.string.book_detail_interrupted_export, 1))
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun `再試行を押すと前回の出力形式を選んだ書き出し画面へ着き提示は消える`() {
+        showApp(pageCount = 2, interruptedExports = listOf(ExportType.MARKDOWN))
+        openBookDetail()
+
+        awaitText(R.string.book_detail_interrupted_export_action)
+        composeTestRule
+            .onNodeWithText(string(R.string.book_detail_interrupted_export_action))
+            .performClick()
+
+        // 書き出し画面に着き、前回の未完了と同じ形式（Markdown）が選ばれている
+        awaitText(R.string.export_format_title)
+        composeTestRule.onNodeWithText(string(R.string.export_format_markdown)).assertIsSelected()
+        composeTestRule.onNodeWithText(string(R.string.export_format_searchable_pdf)).assertIsNotSelected()
+
+        // 書籍詳細へ戻ると提示は消えている（再試行済みの提示を出し続けない）
+        composeTestRule.onNodeWithContentDescription(string(R.string.export_back)).performClick()
+        awaitText(R.string.book_detail_manual_capture)
+        composeTestRule
+            .onNodeWithText(string(R.string.book_detail_interrupted_export_action))
+            .assertDoesNotExist()
+    }
+
     private fun openBookDetail() {
         awaitText(R.string.home_search_hint)
         composeTestRule.waitUntil("ホームに書籍が出ない", TIMEOUT_MILLIS) {
@@ -184,7 +231,10 @@ class PageBinderAppNavigationTest {
         awaitText(R.string.book_detail_manual_capture)
     }
 
-    private fun showApp(pageCount: Int) {
+    private fun showApp(
+        pageCount: Int,
+        interruptedExports: List<ExportType> = emptyList(),
+    ) {
         val pages =
             (1..pageCount).map { sequence ->
                 page(if (sequence == 1) pageId else UUID.randomUUID(), sequence)
@@ -203,6 +253,7 @@ class PageBinderAppNavigationTest {
                     // 書き出しの実処理は ProjectExportStarterTest 側で見る。ここは導線だけ
                     exportStarter = ExportStarter { emptyFlow() },
                     enqueueProjectOcr = { 0 },
+                    findInterruptedExports = { interruptedExports },
                     autoCaptureSettingsRepository = FakeAutoCaptureSettingsRepository(),
                     captureFeedbackSettingsRepository = FakeCaptureFeedbackSettingsRepository(),
                     startCapture = { _, _ -> },

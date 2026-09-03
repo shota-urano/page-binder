@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -51,6 +53,7 @@ import com.pagebinder.app.ui.theme.ColorAccent
 import com.pagebinder.app.ui.theme.ColorDivider
 import com.pagebinder.app.ui.theme.ColorError
 import com.pagebinder.app.ui.theme.ColorTextSecondary
+import com.pagebinder.app.ui.theme.ColorWarning
 import com.pagebinder.app.ui.theme.MinTouchTarget
 import com.pagebinder.app.ui.theme.ScreenHorizontalMargin
 import com.pagebinder.app.ui.theme.SpaceUnit
@@ -77,6 +80,8 @@ data class BookDetailActions(
     val onMoveToTrashConfirmed: () -> Unit,
     val onMoveToTrashDismissed: () -> Unit,
     val onReload: () -> Unit,
+    /** 未完了の書き出しの「再試行」（docs/specs/11-export.md §3.2） */
+    val onRetryInterruptedExport: () -> Unit,
     val manualCaptureAvailable: Boolean = true,
     val continuousCaptureAvailable: Boolean = true,
     val exportAvailable: Boolean = true,
@@ -107,6 +112,12 @@ fun BookDetailScreen(
                             .padding(horizontal = ScreenHorizontalMargin),
                     verticalArrangement = Arrangement.spacedBy(SpaceUnit * 2),
                 ) {
+                    uiState.interruptedExport?.let { interrupted ->
+                        InterruptedExportBanner(
+                            count = interrupted.count,
+                            onRetry = actions.onRetryInterruptedExport,
+                        )
+                    }
                     InfoCard(uiState)
                     StatisticsCard(uiState)
                     Row(horizontalArrangement = Arrangement.spacedBy(SpaceUnit)) {
@@ -338,9 +349,56 @@ private fun DetailAction(
     if (divider) HorizontalDivider(color = ColorDivider)
 }
 
+/**
+ * 未完了の書き出しの提示（docs/specs/11-export.md §3.2 末尾）。
+ *
+ * この提示 UI はデザイン素材（docs/design/03-book-detail.md）に定義が無いため、
+ * 書き出し画面の警告バナー（docs/design/11-export.md「警告バナー」）と同じ
+ * 「⚠ + 文言 + 右端アクション」を warning の薄地で置く。新しい見た目は作らない。
+ */
+@Composable
+private fun InterruptedExportBanner(
+    count: Int,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(CardCornerRadius),
+        color = ColorWarning.copy(alpha = WARNING_SURFACE_ALPHA),
+    ) {
+        Row(
+            modifier =
+                Modifier
+                    .heightIn(min = MinTouchTarget)
+                    .padding(horizontal = ScreenHorizontalMargin, vertical = SpaceUnit),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(imageVector = Icons.Filled.Warning, contentDescription = null, tint = ColorWarning)
+            Spacer(Modifier.width(SpaceUnit * 1.5f))
+            Text(
+                text = stringResource(R.string.book_detail_interrupted_export, count),
+                style = MaterialTheme.typography.bodyMedium,
+                color = ColorWarning,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = MinTouchTarget)) {
+                Text(
+                    text = stringResource(R.string.book_detail_interrupted_export_action),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = ColorWarning,
+                )
+            }
+        }
+    }
+}
+
 private fun BookDetailOperationError.messageRes(): Int =
     when (this) {
         BookDetailOperationError.LOAD -> R.string.book_detail_load_failed
         BookDetailOperationError.MOVE_TO_TRASH -> R.string.book_detail_trash_failed
         BookDetailOperationError.OCR_BATCH -> R.string.book_detail_ocr_failed
     }
+
+/** 警告バナーの薄地。トークンに warning-container が無いため不透明度で作る（書き出し画面と同値） */
+private const val WARNING_SURFACE_ALPHA = 0.12f

@@ -41,6 +41,11 @@ import java.util.UUID
 class ExportViewModel(
     project: ExportProjectSummary,
     private val exportStarter: ExportStarter,
+    /**
+     * 最初に選ばれている出力形式。未完了の書き出しの再試行（docs/specs/11-export.md §3.2 末尾）で
+     * 前回と同じ形式から始めるために書籍詳細が渡す。通常の書き出しは既定のまま。
+     */
+    initialFormat: ExportType = ExportType.SEARCHABLE_PDF,
 ) : ViewModel() {
     private val projectId: UUID = project.projectId
 
@@ -48,6 +53,7 @@ class ExportViewModel(
         MutableStateFlow(
             ExportUiState(
                 pageCount = project.pageCount,
+                format = initialFormat,
                 fileName = project.title,
                 ocrIncompletePageCount = project.ocrIncompletePageCount,
             ),
@@ -239,9 +245,10 @@ class ExportViewModel(
         fun factory(
             project: ExportProjectSummary,
             exportStarter: ExportStarter,
+            initialFormat: ExportType = ExportType.SEARCHABLE_PDF,
         ): ViewModelProvider.Factory =
             viewModelFactory {
-                initializer { ExportViewModel(project, exportStarter) }
+                initializer { ExportViewModel(project, exportStarter, initialFormat) }
             }
     }
 }

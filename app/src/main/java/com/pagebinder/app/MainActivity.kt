@@ -47,6 +47,7 @@ private fun PageBinderRoot() {
         pageThumbnailLoader = application.pageThumbnailLoader,
         exportStarter = application.exportStarter,
         enqueueProjectOcr = application.ocrQueue::enqueueProject,
+        findInterruptedExports = application::findInterruptedExports,
         autoCaptureSettingsRepository = application.autoCaptureSettingsRepository,
         captureFeedbackSettingsRepository = application.captureFeedbackSettingsRepository,
         startCapture = { projectId, request ->

@@ -119,6 +119,7 @@ class BookProjectScreensTest {
         onMoveToTrashConfirmed = {},
         onMoveToTrashDismissed = {},
         onReload = {},
+        onRetryInterruptedExport = {},
     )
 
     private fun string(

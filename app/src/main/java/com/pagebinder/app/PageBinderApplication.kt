@@ -15,13 +15,17 @@ import com.pagebinder.app.domain.CaptureOverlayGateway
 import com.pagebinder.app.domain.CaptureSessionCoordinator
 import com.pagebinder.app.domain.CaptureSessionLifecycle
 import com.pagebinder.app.domain.CaptureStopReason
+import com.pagebinder.app.domain.ExportRecordRepository
 import com.pagebinder.app.domain.ExportStarter
+import com.pagebinder.app.domain.ExportType
 import com.pagebinder.app.domain.OcrImageSource
 import com.pagebinder.app.domain.OcrJobRepository
 import com.pagebinder.app.domain.OcrJobRunner
 import com.pagebinder.app.domain.OcrQueue
 import com.pagebinder.app.domain.OcrQueueScheduler
 import com.pagebinder.app.domain.PageRepository
+import com.pagebinder.app.export.InterruptedExportDetector
+import com.pagebinder.app.export.RetryableExport
 import com.pagebinder.app.image.FilePageThumbnailLoader
 import com.pagebinder.app.ocr.AndroidOcrExecutionPolicy
 import com.pagebinder.app.ocr.MlKitOcrGateway
@@ -34,6 +38,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -50,6 +55,10 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
 
     /** 書き出し画面へ渡す本番の書き出し起動口（docs/specs/11-export.md §3.2） */
     @Inject lateinit var exportStarter: ExportStarter
+
+    @Inject lateinit var exportRecordRepository: ExportRecordRepository
+
+    private val interruptedExportDetector by lazy { InterruptedExportDetector(exportRecordRepository) }
 
     val pageThumbnailLoader by lazy { FilePageThumbnailLoader(imageStore, pageRepository) }
     val ocrQueueScheduler by lazy { createOcrQueueScheduler() }
@@ -147,6 +156,18 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
             executionPolicy = AndroidOcrExecutionPolicy(this),
         )
     }
+
+    /**
+     * 前回のプロセスが残した未完了の書き出しの出力形式を、書籍プロジェクト単位で返す
+     * （docs/specs/11-export.md §3.2 末尾「アプリ強制終了後、未完了の書き出しを検出して再試行できる」）。
+     *
+     * 書籍詳細画面が開かれたときに呼ばれる。保存URIは画面へ渡さない（AGENTS.md ルール6）。
+     */
+    suspend fun findInterruptedExports(projectId: UUID): List<ExportType> =
+        interruptedExportDetector
+            .detect()
+            .filter { it.projectId == projectId }
+            .map(RetryableExport::type)
 
     override fun onCreate() {
         super.onCreate()

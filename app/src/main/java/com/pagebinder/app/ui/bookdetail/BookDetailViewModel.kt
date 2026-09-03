@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.pagebinder.app.domain.BookProjectRepository
 import com.pagebinder.app.domain.BookProjectSummary
+import com.pagebinder.app.domain.ExportType
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +22,17 @@ data class MoveToTrashConfirmationUiState(
     val title: String,
     val pageCount: Int,
     val storageBytes: Long,
+)
+
+/**
+ * 前回のプロセスが残した未完了の書き出しの提示（docs/specs/11-export.md §3.2 末尾
+ * 「アプリ強制終了後、未完了の書き出しを検出して再試行できる」）。
+ *
+ * [format] は再試行で選び直させる出力形式（最も古い未完了レコードのもの）、[count] は検出件数。
+ */
+data class InterruptedExportUiState(
+    val format: ExportType,
+    val count: Int,
 )
 
 enum class BookDetailOperationError {
@@ -43,6 +55,7 @@ data class BookDetailUiState(
     val operationError: BookDetailOperationError? = null,
     val movedToTrash: Boolean = false,
     val queuedOcrCount: Int? = null,
+    val interruptedExport: InterruptedExportUiState? = null,
 ) {
     /** 1ページも無い書籍には書き出す成果物が無い（docs/specs/11-export.md §2 入力）。 */
     val exportAvailable: Boolean get() = !loading && pageCount > 0
@@ -52,6 +65,7 @@ class BookDetailViewModel(
     private val projectId: UUID,
     private val repository: BookProjectRepository,
     private val enqueueProjectOcr: suspend (UUID) -> Int,
+    private val findInterruptedExports: suspend (UUID) -> List<ExportType>,
 ) : ViewModel() {
     private val mutableUiState = MutableStateFlow(BookDetailUiState())
     val uiState: StateFlow<BookDetailUiState> = mutableUiState.asStateFlow()
@@ -62,6 +76,37 @@ class BookDetailViewModel(
 
     init {
         load()
+        detectInterruptedExports()
+    }
+
+    /**
+     * 未完了の書き出しを検出して提示する（docs/specs/11-export.md §3.2）。
+     *
+     * 検出は ViewModel 1インスタンスにつき1回（= 書籍詳細を最初に開いたとき）だけ行う。
+     * 再試行は保存先を選び直す新しい書き出しなので、前回の未完了レコード自体は残る。
+     * [load] のたびに検出し直すと同じ提示が消えなくなるため、ここでは1回だけ拾う。
+     */
+    private fun detectInterruptedExports() {
+        viewModelScope.launch {
+            val formats =
+                try {
+                    findInterruptedExports(projectId)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // 例外の内容はログへ出さない（保存URIが混ざりうる — AGENTS.md ルール6）
+                    emptyList()
+                }
+            val format = formats.firstOrNull() ?: return@launch
+            mutableUiState.update {
+                it.copy(interruptedExport = InterruptedExportUiState(format, formats.size))
+            }
+        }
+    }
+
+    /** 再試行を選んだ。提示を閉じ、書き出し画面へ入り直すのは呼び出し側（導線）の役目 */
+    fun onInterruptedExportRetried() {
+        mutableUiState.update { it.copy(interruptedExport = null) }
     }
 
     /**
@@ -164,8 +209,13 @@ class BookDetailViewModel(
             projectId: UUID,
             repository: BookProjectRepository,
             enqueueProjectOcr: suspend (UUID) -> Int,
+            findInterruptedExports: suspend (UUID) -> List<ExportType>,
         ): ViewModelProvider.Factory =
-            viewModelFactory { initializer { BookDetailViewModel(projectId, repository, enqueueProjectOcr) } }
+            viewModelFactory {
+                initializer {
+                    BookDetailViewModel(projectId, repository, enqueueProjectOcr, findInterruptedExports)
+                }
+            }
     }
 }
 
