@@ -47,16 +47,6 @@ interface ExportRecordRepository {
         expected: ExportRecord,
         updated: ExportRecord,
     ): Boolean
-
-    /**
-     * 書き出しの履歴から [expected] を取り除く。[compareAndSet] と同じ規約で、保存されている
-     * レコードが [expected] と一致するときだけ削除し、一致しなければ何もせず false を返す。
-     *
-     * 用途は、実行に入らないまま取り残された queued レコードの片付けだけ。仕様の状態遷移
-     * （docs/specs/11-export.md §3.2 手順6 `queued → running → succeeded / failed`）に
-     * queued からの終端は無いため終端状態を作れない — `export/` の ExportRecordCoordinator を見よ。
-     */
-    suspend fun compareAndDelete(expected: ExportRecord): Boolean
 }
 
 /**

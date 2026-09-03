@@ -172,9 +172,10 @@ open class PageBinderApplication : Application(), OcrWorkerDependencies {
             .map { InterruptedExport(recordId = it.recordId, type = it.type) }
 
     /**
-     * 再試行の書き出しが成功したので、取り残されていたレコードを片付ける。running は failed で閉じ、
-     * 実行に入っていない queued は履歴から取り除く（遷移規則は ExportRecordCoordinator.markInterrupted）。
-     * これで次に書籍詳細を開いたときの検出から外れ、提示が消える。
+     * 再試行の書き出しが成功したので、取り残されていたレコードを failed で終端させる。queued の
+     * まま残っていた場合も仕様の経路 queued → running → failed をたどる（docs/specs/11-export.md
+     * §3.2 手順6。詳細は ExportRecordCoordinator.markInterrupted）。これで次に書籍詳細を開いた
+     * ときの検出から外れ、提示が消える。
      */
     suspend fun resolveInterruptedExport(recordId: UUID) {
         exportRecordCoordinator.markInterrupted(recordId)

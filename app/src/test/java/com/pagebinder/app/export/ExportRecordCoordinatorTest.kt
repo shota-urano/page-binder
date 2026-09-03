@@ -89,29 +89,40 @@ class ExportRecordCoordinatorTest {
         }
 
     /**
-     * queued のまま取り残されたレコード（強制終了が enqueue 後・running 前に起きた場合）は
-     * 履歴から取り除く。仕様の状態遷移 `queued → running → succeeded / failed`
+     * queued のまま取り残されたレコード（強制終了が enqueue 後・running 前に起きた場合）も
+     * failed で終端する。仕様の状態遷移 `queued → running → succeeded / failed`
      * （docs/specs/11-export.md §3.2 手順6）に queued からの終端は無いので、
-     * queued → failed のような仕様外の遷移を書いてはいけない。
+     * queued → failed のような仕様外の遷移を書かず、queued → running を経てから閉じる。
+     * 履歴レコードなので削除もしない（02-data-model §3.1）。
      */
     @Test
-    fun `interrupted queued record is discarded without an out-of-spec transition`() =
+    fun `interrupted queued record is closed through queued to running to failed`() =
         runBlocking {
             val repository = AtomicInMemoryExportRecordRepository()
             val coordinator = coordinator(repository)
             coordinator.enqueue(projectId, ExportType.MARKDOWN)
 
-            assertNull(coordinator.markInterrupted(recordId))
+            val closed = coordinator.markInterrupted(recordId)
 
-            assertNull(repository.findById(recordId))
+            assertEquals(ExportState.FAILED, closed?.state)
+            assertEquals(now, closed?.completedAt)
+            assertEquals(ExportFailureCode.INTERRUPTED, closed?.errorCode)
+            // 実行に入る前に落ちているので保存先は決まらないまま
+            assertNull(closed?.targetUri)
+            // 履歴として残り続ける
+            assertEquals(closed, repository.findById(recordId))
             assertTrue(repository.findIncomplete().isEmpty())
             assertEquals(
-                "queued からの状態遷移は1つも書かれない",
-                emptyList<Pair<ExportState, ExportState>>(),
+                "仕様の状態遷移グラフに無い辺は書かれない",
+                listOf(
+                    ExportState.QUEUED to ExportState.RUNNING,
+                    ExportState.RUNNING to ExportState.FAILED,
+                ),
                 repository.writtenTransitions,
             )
-            // 取り除いたあとにもう一度呼ばれても壊れない
-            assertNull(coordinator.markInterrupted(recordId))
+            // 終端後にもう一度呼ばれても書き足さない
+            assertEquals(closed, coordinator.markInterrupted(recordId))
+            assertEquals(2, repository.writtenTransitions.size)
         }
 
     /** 終端済みのレコードは書き換えない（再試行が二重に走っても壊れない） */
@@ -189,12 +200,6 @@ class ExportRecordCoordinatorTest {
             if (rejectUpdates || records[expected.id] != expected) return false
             records[expected.id] = updated
             writtenTransitions += expected.state to updated.state
-            return true
-        }
-
-        override suspend fun compareAndDelete(expected: ExportRecord): Boolean {
-            if (rejectUpdates || records[expected.id] != expected) return false
-            records.remove(expected.id)
             return true
         }
     }

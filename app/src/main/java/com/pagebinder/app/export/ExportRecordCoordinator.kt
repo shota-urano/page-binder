@@ -69,35 +69,49 @@ class ExportRecordCoordinator(
     }
 
     /**
-     * プロセス終了で queued / running のまま取り残されたレコードを片付ける
+     * プロセス終了で queued / running のまま取り残されたレコードを終端させる
      * （docs/specs/11-export.md §3.2 末尾「アプリ強制終了後、未完了の書き出しを検出して再試行できる」）。
      * 呼ぶのは再試行の書き出しが成功したときだけ。
      *
-     * 仕様の状態遷移は `queued → running → succeeded / failed`（同 手順6）で、queued から終端へ
-     * 直接向かう遷移は無い。そこで取り残されたレコードは**実行に入っていたか**で扱いを分ける。
+     * 終端は必ず failed（errorCode = `interrupted`）。取り残されたレコードは §3.2 手順5 の
+     * 「完了で確定する」に達しておらず、成功扱いにはできない（FR-EXP-007）。履歴レコードなので
+     * 消さずに残す（docs/specs/02-data-model.md §3.1 ExportRecord は書き出しの履歴）。
      *
-     * - running: 保存先に書きかけの成果物が残りうる。完了で確定していないので成功扱いにはできず
-     *   （同 手順5 / FR-EXP-007）、[markFailed] と同じ `running → failed` で errorCode に
-     *   `interrupted` を付けて閉じる
-     * - queued: 実行に入っておらず、保存先も成果物も無い。仕様に無い終端状態を作らず、
-     *   書き出しの履歴から取り除く（この書き出しの履歴は再試行側のレコードが持つ）
+     * 経路は仕様の状態遷移グラフ `queued → running → succeeded / failed`（同 手順6）だけを使う。
      *
-     * すでに終端しているレコードには触れずそのまま返す。queued を取り除いた場合と、
-     * 取り除いたあとにもう一度呼ばれた場合は null を返すので、多重に呼ばれても壊れない。
+     * - running: そのまま `running → failed`
+     * - queued: 仕様上 queued の唯一の後続である `queued → running` を経てから `running → failed`。
+     *   queued からの終端遷移という仕様に無い辺を作らない
+     *
+     * すでに終端しているレコードには触れずそのまま返すので、多重に呼ばれても壊れない。
+     * 該当レコードが無い場合だけ null を返す。
      */
     suspend fun markInterrupted(id: UUID): ExportRecord? {
         val current = repository.findById(id) ?: return null
         return when (current.state) {
             ExportState.RUNNING -> markFailed(id, ExportFailureCode.INTERRUPTED)
             ExportState.QUEUED -> {
-                if (!repository.compareAndDelete(current)) {
-                    throw ConcurrentExportRecordUpdateException(id)
-                }
-                null
+                resumeInterruptedRun(id)
+                markFailed(id, ExportFailureCode.INTERRUPTED)
             }
             ExportState.SUCCEEDED, ExportState.FAILED -> current
         }
     }
+
+    /**
+     * 取り残された queued のレコードを、仕様の唯一の後続 `queued → running` へ進める
+     * （docs/specs/11-export.md §3.2 手順6）。実行に入る前に落ちているので保存先は決まっておらず、
+     * `targetUri` は null のまま（02-data-model §3.1 で nullable）。この状態から
+     * [markFailed] が `running → failed` で終端させる。
+     */
+    private suspend fun resumeInterruptedRun(id: UUID): ExportRecord =
+        transition(id, ExportState.QUEUED) { current ->
+            current.copy(
+                state = ExportState.RUNNING,
+                completedAt = null,
+                errorCode = null,
+            )
+        }
 
     private suspend fun transition(
         id: UUID,

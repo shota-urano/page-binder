@@ -409,12 +409,6 @@ class ProjectExportStarterTest {
             stored[expected.id] = updated
             return true
         }
-
-        override suspend fun compareAndDelete(expected: ExportRecord): Boolean {
-            if (stored[expected.id] != expected) return false
-            stored.remove(expected.id)
-            return true
-        }
     }
 
     private companion object {

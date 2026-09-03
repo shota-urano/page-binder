@@ -160,44 +160,39 @@ class RoomExportRecordRepositoryTest {
             assertTrue(repository.findById(recordId) in candidates)
         }
 
-    @Test
-    fun compareAndDeleteRemovesOnlyTheUnchangedRecord() =
-        runBlocking {
-            val queued = record(state = ExportState.QUEUED)
-            val running =
-                queued.copy(
-                    state = ExportState.RUNNING,
-                    targetUri = "content://provider/document/redacted",
-                )
-            repository.insert(queued)
-            assertTrue(repository.compareAndSet(queued, running))
-
-            // 古い期待値では消えない（別の書き手が進めたレコードを取りこぼさない）
-            assertFalse(repository.compareAndDelete(queued))
-            assertEquals(running, repository.findById(recordId))
-
-            assertTrue(repository.compareAndDelete(running))
-            assertNull(repository.findById(recordId))
-        }
-
     /**
-     * 取り残されたレコードの片付け（docs/specs/11-export.md §3.2 末尾）を Room 上で確かめる。
-     * queued は履歴から消え、running は仕様どおり running → failed で閉じる（同 手順6）。
+     * 取り残されたレコードの終端（docs/specs/11-export.md §3.2 末尾）を Room 上で確かめる。
+     * queued のまま取り残された場合も仕様の経路 queued → running → failed をたどって閉じ、
+     * 履歴レコードは消えずに残る（同 手順6 / 02-data-model §3.1）。
      */
     @Test
-    fun coordinatorDiscardsInterruptedQueuedRecordAndClosesRunningOne() =
+    fun coordinatorClosesInterruptedQueuedRecordThroughSpecTransitions() =
         runBlocking {
             val coordinator = coordinator()
             coordinator.enqueue(projectId, ExportType.MARKDOWN)
 
-            assertNull(coordinator.markInterrupted(recordId))
-            assertNull(repository.findById(recordId))
-            assertTrue(repository.findIncomplete().isEmpty())
-
-            coordinator.enqueue(projectId, ExportType.MARKDOWN)
-            coordinator.markRunning(recordId, "content://provider/document/redacted")
-
             val closed = coordinator.markInterrupted(recordId)
+
+            assertEquals(ExportState.FAILED, closed?.state)
+            assertEquals(ExportFailureCode.INTERRUPTED, closed?.errorCode)
+            // 実行に入る前に落ちているので保存先は決まらないまま
+            assertNull(closed?.targetUri)
+            assertEquals(closed, repository.findById(recordId))
+            assertTrue(repository.findIncomplete().isEmpty())
+        }
+
+    /** running のまま取り残された場合は running → failed でそのまま閉じる（同 手順6） */
+    @Test
+    fun coordinatorClosesInterruptedRunningRecordAsFailed() =
+        runBlocking {
+            repository.insert(
+                record(
+                    state = ExportState.RUNNING,
+                    targetUri = "content://provider/document/redacted",
+                ),
+            )
+
+            val closed = coordinator().markInterrupted(recordId)
 
             assertEquals(ExportState.FAILED, closed?.state)
             assertEquals(ExportFailureCode.INTERRUPTED, closed?.errorCode)

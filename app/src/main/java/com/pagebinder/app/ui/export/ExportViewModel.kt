@@ -48,8 +48,8 @@ class ExportViewModel(
      */
     initialFormat: ExportType = ExportType.SEARCHABLE_PDF,
     /**
-     * 未完了の書き出しの再試行として開かれたときだけ渡る、取り残されたレコードの片付け
-     * （docs/specs/11-export.md §3.2 末尾。何をするかは ExportRecordCoordinator.markInterrupted）。
+     * 未完了の書き出しの再試行として開かれたときだけ渡る、取り残されたレコードの終端化
+     * （docs/specs/11-export.md §3.2 手順6。何をするかは ExportRecordCoordinator.markInterrupted）。
      *
      * 呼ぶのは書き出しが**成功した**ときだけ。手順5の「完了で確定する」を満たして初めて
      * 取り残しが解消したとみなす（FR-EXP-007）。戻る・SAF を閉じる・失敗した場合は呼ばないので、
