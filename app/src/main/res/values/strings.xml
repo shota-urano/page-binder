@@ -56,6 +56,7 @@
     <string name="book_detail_pages">ページ一覧</string>
     <string name="book_detail_ocr_batch">OCR一括実行</string>
     <string name="book_detail_export">書き出し</string>
+    <string name="book_detail_export_unavailable">ページがないため書き出せません。まず撮影してください。</string>
     <string name="book_detail_settings">書籍設定</string>
     <string name="book_detail_move_to_trash">ごみ箱に移動</string>
     <string name="book_detail_trash_dialog_title">ごみ箱に移動しますか?</string>

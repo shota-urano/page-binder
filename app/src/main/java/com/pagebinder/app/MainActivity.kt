@@ -45,6 +45,7 @@ private fun PageBinderRoot() {
         bookProjectRepository = application.bookProjectRepository,
         pageRepository = application.pageRepository,
         pageThumbnailLoader = application.pageThumbnailLoader,
+        exportStarter = application.exportStarter,
         enqueueProjectOcr = application.ocrQueue::enqueueProject,
         autoCaptureSettingsRepository = application.autoCaptureSettingsRepository,
         captureFeedbackSettingsRepository = application.captureFeedbackSettingsRepository,

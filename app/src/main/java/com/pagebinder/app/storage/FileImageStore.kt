@@ -147,8 +147,8 @@ class FileImageStore(
 
     private fun temporaryDirectory(projectId: UUID): File = File(projectDirectory(projectId), TEMP_DIRECTORY)
 
-    private fun exportsCacheDirectory(projectId: UUID): File =
-        File(projectDirectory(projectId), EXPORTS_CACHE_DIRECTORY)
+    /** 書き出し前の一時出力先（docs/specs/02-data-model.md §3.2 `exports-cache/`）。Export Engine が使う */
+    fun exportsCacheDirectory(projectId: UUID): File = File(projectDirectory(projectId), EXPORTS_CACHE_DIRECTORY)
 
     private fun projectDirectory(projectId: UUID): File =
         File(File(filesDirectory, PROJECTS_DIRECTORY), projectId.toString())
