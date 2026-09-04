@@ -58,6 +58,24 @@ class CaptureSessionCoordinatorTest {
         }
 
     @Test
+    fun `単一アプリ共有の対象が不可視なら専用理由で安全停止する`() =
+        runTest {
+            val fixture = fixture(backgroundScope)
+            fixture.coordinator.prepare(CaptureMode.MANUAL)
+            fixture.coordinator.start(FakePermissionToken)
+
+            fixture.gateway.emit(
+                CaptureGatewayEvent.ProjectionStopped(CaptureStopReason.SHARED_CONTENT_NOT_VISIBLE),
+            )
+            runCurrent()
+
+            assertEquals(CaptureSessionState.Idle, fixture.coordinator.state.value)
+            assertEquals(CaptureStopReason.SHARED_CONTENT_NOT_VISIBLE, fixture.coordinator.lastStopReason.value)
+            assertEquals(1, fixture.gateway.stopCount)
+            assertEquals(1, fixture.lifecycle.idleCount)
+        }
+
+    @Test
     fun `共有領域のリサイズは active 状態の次フレーム寸法に反映する`() =
         runTest {
             val fixture = fixture(backgroundScope)

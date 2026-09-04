@@ -84,7 +84,7 @@ class CaptureForegroundService : Service() {
                         val reason = coordinator.lastStopReason.value
                         stopServiceForeground()
                         if (reason != null && reason != CaptureStopReason.EXPLICIT) {
-                            statusNotifier.postUnexpectedStop()
+                            statusNotifier.postUnexpectedStop(reason)
                         }
                     }
                 }

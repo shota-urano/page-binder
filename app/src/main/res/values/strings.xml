@@ -130,6 +130,7 @@
     <string name="capture_notification_auto_stopped_duration">最大時間に達したため連続撮影を終了しました</string>
     <string name="capture_notification_stopped_title">撮影を終了しました</string>
     <string name="capture_notification_stopped_message">画面共有が停止されたため、撮影セッションを安全に終了しました</string>
+    <string name="capture_notification_select_entire_screen">共有するアプリが表示されなくなったため撮影を終了しました。画面全体（Entire screen）を選び直して撮影を開始してください。</string>
 
     <string name="trash_back">戻る</string>
     <string name="trash_title">ごみ箱</string>

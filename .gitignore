@@ -4,6 +4,9 @@ local.properties
 .DS_Store
 *.apk
 *.aab
+*.jks
+*.keystore
+keystore.properties
 .kotlin/
 captures/
 .idea/
