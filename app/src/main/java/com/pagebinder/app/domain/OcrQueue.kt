@@ -47,6 +47,9 @@ interface OcrJobRepository {
         expectedStates: Set<OcrState>,
     ): Int
 
+    /** Pages of [projectId] that are waiting for OCR or already running. */
+    suspend fun countAwaitingOcr(projectId: UUID): Int
+
     /** Returns and atomically changes the oldest pending page to running. */
     suspend fun claimNextPending(): OcrPage?
 
@@ -89,14 +92,21 @@ class OcrQueue(
         return queued
     }
 
+    /**
+     * 書籍単位のOCR一括実行（docs/specs/09-ocr.md §3.2）。失敗・stale を実行待ちへ戻したうえで、
+     * **これからOCRされるページ数**（実行待ち＋実行中）を返す。
+     *
+     * 今回状態を変えた件数ではない。撮影直後は全ページが既に pending なので、変更件数だと常に0になり
+     * 「0件を予約しました」と実態に反する表示になる（pagebinder-cwz）。撮影セッション中は FR-OCR-009
+     * により実行そのものを止めているので、待ち行列の長さを返すのがこの画面の意味に合う。
+     */
     suspend fun enqueueProject(projectId: UUID): Int {
-        val queued =
-            repository.markProjectPending(
-                projectId,
-                setOf(OcrState.FAILED, OcrState.STALE),
-            )
+        repository.markProjectPending(
+            projectId,
+            setOf(OcrState.FAILED, OcrState.STALE),
+        )
         scheduler.wake()
-        return queued
+        return repository.countAwaitingOcr(projectId)
     }
 
     suspend fun resumeIncomplete(): Int {

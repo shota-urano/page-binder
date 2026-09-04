@@ -101,6 +101,39 @@ class OcrQueueTest {
             assertEquals(1, scheduler.wakeCount)
         }
 
+    /**
+     * pagebinder-cwz: 撮影直後は全ページが既に pending なので「今回状態を変えた件数」は0になる。
+     * 一括実行が返すのは、これからOCRされるページ数でなければならない。
+     */
+    @Test
+    fun `bulk enqueue reports pages already waiting for ocr`() =
+        runTest {
+            val projectId = UUID.randomUUID()
+            val repository =
+                FakeOcrJobRepository(
+                    page(OcrState.PENDING, projectId),
+                    page(OcrState.PENDING, projectId),
+                    page(OcrState.RUNNING, projectId),
+                )
+            val scheduler = RecordingScheduler()
+
+            assertEquals(3, OcrQueue(repository, scheduler).enqueueProject(projectId))
+            assertEquals(1, scheduler.wakeCount)
+        }
+
+    @Test
+    fun `bulk enqueue reports zero when every page finished ocr`() =
+        runTest {
+            val projectId = UUID.randomUUID()
+            val repository =
+                FakeOcrJobRepository(
+                    page(OcrState.SUCCEEDED, projectId),
+                    page(OcrState.SUCCEEDED, projectId),
+                )
+
+            assertEquals(0, OcrQueue(repository, RecordingScheduler()).enqueueProject(projectId))
+        }
+
     @Test
     fun `capture priority defers without claiming pending work`() =
         runTest {
@@ -169,7 +202,8 @@ class OcrQueueTest {
                 lifecycle.onSessionIdle()
 
                 assertTrue(executionPolicy.canRun())
-                assertEquals(listOf(ExistingWorkPolicy.APPEND_OR_REPLACE), policies)
+                // 撮影中に積み上がった retry のバックオフごと作り直す（pagebinder-6z1）
+                assertEquals(listOf(ExistingWorkPolicy.REPLACE), policies)
                 assertEquals(
                     OcrRunResult.QueueEmpty,
                     runner(repository, successfulGateway(), executionPolicy).drain(),
@@ -202,6 +236,25 @@ class OcrQueueTest {
         scheduler.wake()
 
         assertEquals(listOf(ExistingWorkPolicy.APPEND_OR_REPLACE), policies)
+    }
+
+    /**
+     * pagebinder-6z1: 撮影中のワーカーは retry を返し、線形バックオフ（10秒×試行回数）が積み上がる。
+     * 撮影の停止で作り直さないと、止めた後もバックオフ残り分だけOCRが始まらない。
+     */
+    @Test
+    fun `session idle replaces the backed off worker instead of queueing behind it`() {
+        val policies = mutableListOf<ExistingWorkPolicy>()
+        val scheduler = WorkManagerOcrQueueScheduler(enqueueWork = policies::add, cancelWork = {})
+
+        try {
+            scheduler.onSessionActive()
+            scheduler.onSessionIdle()
+
+            assertEquals(listOf(ExistingWorkPolicy.REPLACE), policies)
+        } finally {
+            CapturePriorityGate.isCaptureActive = false
+        }
     }
 
     private fun runner(
@@ -273,6 +326,11 @@ class OcrQueueTest {
             pages.values
                 .filter { it.projectId == projectId && it.ocrState in expectedStates }
                 .count { transition(it.id, expectedStates, OcrState.PENDING) }
+
+        override suspend fun countAwaitingOcr(projectId: UUID): Int =
+            pages.values.count {
+                it.projectId == projectId && it.ocrState in setOf(OcrState.PENDING, OcrState.RUNNING)
+            }
 
         override suspend fun claimNextPending(): OcrPage? {
             val page = pages.values.firstOrNull { it.ocrState == OcrState.PENDING } ?: return null

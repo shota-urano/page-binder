@@ -1,5 +1,6 @@
 package com.pagebinder.app.domain
 
+import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 import java.util.UUID
 
@@ -84,6 +85,13 @@ interface PageRepository {
     suspend fun findById(id: UUID): Page?
 
     suspend fun findByProject(projectId: UUID): List<Page>
+
+    /**
+     * Emits the pages of [projectId] in sequence order and re-emits whenever they change, so a
+     * screen that stays open follows captures, edits and deletions without asking again
+     * (docs/specs/08-page-editing.md §3.1).
+     */
+    fun observeByProject(projectId: UUID): Flow<List<Page>>
 
     /** Replaces the complete page order for [projectId] and assigns contiguous sequences from 1. */
     suspend fun reorder(

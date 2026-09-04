@@ -13,10 +13,16 @@ import com.pagebinder.app.domain.PageCrop
 import com.pagebinder.app.domain.PageCropScope
 import com.pagebinder.app.domain.PageOcrState
 import com.pagebinder.app.domain.PageQualityState
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -232,6 +238,68 @@ class RoomPageRepositoryTest {
             assertFalse(repository.undoLastEdit())
         }
 
+    /**
+     * pagebinder-3my: 一覧を開いたまま撮影したページが入ること。
+     * 一度読みの実装ではここで空のまま止まり、アプリを再起動するまで一覧に出なかった。
+     */
+    @Test
+    fun observedPagesReEmitWhenCaptureInsertsAndDeletes() =
+        runBlocking {
+            val emissions = Channel<List<Page>>(Channel.UNLIMITED)
+            val collectJob = launch { repository.observeByProject(projectId).collect(emissions::send) }
+            try {
+                assertTrue(emissions.awaitPages(List<Page>::isEmpty).isEmpty())
+
+                insertPages(3)
+
+                val captured = emissions.awaitPages { it.size == 3 }
+                assertEquals(listOf(1, 2, 3), captured.map(Page::sequence))
+
+                repository.delete(projectId, setOf(pageIds[0]))
+
+                val remaining = emissions.awaitPages { it.size == 2 }
+                assertEquals(listOf(pageIds[1], pageIds[2]), remaining.map(Page::id))
+            } finally {
+                collectJob.cancel()
+            }
+        }
+
+    /**
+     * pagebinder-dy7: ocr_results は pages への外部キーを持たないので、ページ削除で一緒に消さないと
+     * 孤児行が残る。取り消しではページと同じ1操作でOCR結果も戻る。
+     */
+    @Test
+    fun deletingPagesRemovesTheirOcrResultsAndUndoRestoresThem() =
+        runBlocking {
+            insertPages(3, PageOcrState.SUCCEEDED)
+            pageIds.take(3).forEach { database.testOcrResultDao().insert(ocrResult(it)) }
+
+            repository.delete(projectId, setOf(pageIds[0], pageIds[1]))
+
+            assertNull(database.ocrResultDao().findByPageId(pageIds[0].toString()))
+            assertNull(database.ocrResultDao().findByPageId(pageIds[1].toString()))
+            assertNotNull(database.ocrResultDao().findByPageId(pageIds[2].toString()))
+
+            assertTrue(repository.undoLastEdit())
+
+            assertEquals(3, repository.findByProject(projectId).size)
+            assertEquals(
+                "text-${pageIds[0]}",
+                database.ocrResultDao().findByPageId(pageIds[0].toString())?.fullText,
+            )
+        }
+
+    private fun ocrResult(pageId: UUID) =
+        OcrResultEntity(
+            pageId = pageId,
+            fullText = "text-$pageId",
+            blocksJson = "{}",
+            editedText = null,
+            engineVersion = "test-1",
+            sourceImageHash = "hash-$pageId",
+            processedAt = Instant.parse("2026-08-27T01:02:03Z"),
+        )
+
     private suspend fun insertPages(
         count: Int,
         ocrState: PageOcrState = PageOcrState.PENDING,
@@ -259,8 +327,17 @@ class RoomPageRepositoryTest {
     )
 }
 
+private suspend fun ReceiveChannel<List<Page>>.awaitPages(predicate: (List<Page>) -> Boolean): List<Page> =
+    withTimeout(OBSERVE_TIMEOUT_MILLIS) {
+        var value = receive()
+        while (!predicate(value)) value = receive()
+        value
+    }
+
+private const val OBSERVE_TIMEOUT_MILLIS = 5_000L
+
 @Database(
-    entities = [BookProjectEntity::class, PageEntity::class],
+    entities = [BookProjectEntity::class, PageEntity::class, OcrResultEntity::class],
     version = 1,
     exportSchema = false,
 )
@@ -269,6 +346,17 @@ abstract class TestPageDatabase : RoomDatabase() {
     abstract fun projectDao(): TestProjectDao
 
     abstract fun pageDao(): PageDao
+
+    abstract fun ocrResultDao(): OcrResultDao
+
+    abstract fun testOcrResultDao(): TestOcrResultDao
+}
+
+/** 本番の [OcrResultDao] は書き込みを edited_text に限っているので、テストの用意用に別口を置く */
+@Dao
+interface TestOcrResultDao {
+    @Insert
+    suspend fun insert(result: OcrResultEntity)
 }
 
 @Dao

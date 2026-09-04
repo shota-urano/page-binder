@@ -5,10 +5,15 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.pagebinder.app.domain.Page
 import com.pagebinder.app.domain.PageRepository
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -33,32 +38,62 @@ class PageListViewModel(
     /** ドラッグで並びを動かしたが、まだ永続化していない */
     private var reorderPending = false
 
+    /** 永続化を走らせている最中のドラッグの数。0 でなければ購読の値を当てない */
+    private var reorderWritesInFlight = 0
+
+    /** 購読の張り直しの合図。読み込み失敗からの再試行で値が変わる */
+    private val reloadTrigger = MutableStateFlow(0)
+
+    /**
+     * ページを購読する。撮影・編集・削除で [PageRepository] が新しい一覧を流し、
+     * 画面を開いたままでも現在値になる（一覧を開いてから撮った分が入る）。
+     */
     init {
-        load()
+        viewModelScope.launch {
+            reloadTrigger.collectLatest {
+                observePages().collect { pages ->
+                    pages.fold(onSuccess = ::applyPages, onFailure = { markLoadFailed() })
+                }
+            }
+        }
     }
 
-    /** ページを読み直す。失敗時は一覧を消さずにエラー表示だけを出す（docs/specs/08-page-editing.md §6） */
+    /**
+     * 購読を張り直す。読み込みに失敗したときの再試行の導線で、成功すれば現在値が流れ直す
+     * （docs/specs/08-page-editing.md §6）。
+     */
     fun load() {
         mutableUiState.update { it.copy(loading = true, loadFailed = false) }
-        viewModelScope.launch {
-            runCatching { pageRepository.findByProject(projectId) }
-                .onSuccess { pages ->
-                    val items = pages.sortedBy { it.sequence }.map { it.toPageListItemUiState() }
-                    val remainingIds = items.map(PageListItemUiState::pageId).toSet()
-                    mutableUiState.update { current ->
-                        current.copy(
-                            loading = false,
-                            loadFailed = false,
-                            pages = items,
-                            // 消えたページの選択は持ち越さない（件数表示が実在しないページを数えないため）
-                            selectedPageIds = current.selectedPageIds.intersect(remainingIds),
-                        )
-                    }
-                }.onFailure {
-                    // 例外の内容はログへ出さない（画像パス・書籍情報が混ざりうる。AGENTS.md ルール6）
-                    mutableUiState.update { it.copy(loading = false, loadFailed = true) }
-                }
+        reloadTrigger.update { it + 1 }
+    }
+
+    /** 購読の失敗を1件の値として流し、失敗しても購読自体は張り直せる形にする */
+    private fun observePages(): Flow<Result<List<Page>>> =
+        pageRepository
+            .observeByProject(projectId)
+            .map { pages -> Result.success(pages) }
+            .catch { error -> emit(Result.failure(error)) }
+
+    private fun applyPages(pages: List<Page>) {
+        // ドラッグ中と、その並びを書き込み終えるまでは当てない（指の下で一覧が古い順序へ戻るため）
+        if (reorderPending || reorderWritesInFlight > 0) return
+        val items = pages.sortedBy { it.sequence }.map { it.toPageListItemUiState() }
+        val remainingIds = items.map(PageListItemUiState::pageId).toSet()
+        mutableUiState.update { current ->
+            current.copy(
+                loading = false,
+                loadFailed = false,
+                pages = items,
+                // 消えたページの選択は持ち越さない（件数表示が実在しないページを数えないため）
+                selectedPageIds = current.selectedPageIds.intersect(remainingIds),
+            )
         }
+    }
+
+    /** 失敗時は一覧を消さずにエラー表示だけを出す（docs/specs/08-page-editing.md §6） */
+    private fun markLoadFailed() {
+        // 例外の内容はログへ出さない（画像パス・書籍情報が混ざりうる。AGENTS.md ルール6）
+        mutableUiState.update { it.copy(loading = false, loadFailed = true) }
     }
 
     fun onViewModeChange(viewMode: PageListViewMode) {
@@ -127,17 +162,21 @@ class PageListViewModel(
     fun onReorderFinished() {
         if (!reorderPending) return
         reorderPending = false
+        reorderWritesInFlight++
         val orderedPageIds = mutableUiState.value.pages.map(PageListItemUiState::pageId)
         viewModelScope.launch {
-            runCatching { pageRepository.reorder(projectId, orderedPageIds) }
-                .onSuccess {
-                    mutableUiState.update {
-                        it.copy(undoableEdit = PageListUndoableEdit.Reorder, operationError = null)
+            val result =
+                runCatching { pageRepository.reorder(projectId, orderedPageIds) }
+                    .onSuccess {
+                        mutableUiState.update {
+                            it.copy(undoableEdit = PageListUndoableEdit.Reorder, operationError = null)
+                        }
+                    }.onFailure {
+                        mutableUiState.update { it.copy(operationError = PageListOperationError.REORDER) }
                     }
-                }.onFailure {
-                    mutableUiState.update { it.copy(operationError = PageListOperationError.REORDER) }
-                }
-            load()
+            reorderWritesInFlight--
+            // 成功した並びは購読が流し直す。失敗は書き込みが起きておらず購読も動かないので読み直す
+            if (result.isFailure) load()
         }
     }
 
@@ -178,7 +217,6 @@ class PageListViewModel(
                         it.copy(deleting = false, operationError = PageListOperationError.DELETE)
                     }
                 }
-            load()
         }
     }
 
@@ -202,7 +240,6 @@ class PageListViewModel(
                         it.copy(undoableEdit = null, operationError = PageListOperationError.UNDO)
                     }
                 }
-            load()
         }
     }
 

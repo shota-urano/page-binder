@@ -52,6 +52,8 @@ data class BookDetailUiState(
     val note: String? = null,
     val pageCount: Int = 0,
     val ocrCompletedCount: Int = 0,
+    /** OCRの順番待ち（実行待ち＋実行中）。0 でなければ進捗を出す */
+    val awaitingOcrCount: Int = 0,
     val ocrErrorCount: Int = 0,
     val storageBytes: Long = 0,
     val moveToTrashConfirmation: MoveToTrashConfirmationUiState? = null,
@@ -63,6 +65,24 @@ data class BookDetailUiState(
 ) {
     /** 1ページも無い書籍には書き出す成果物が無い（docs/specs/11-export.md §2 入力）。 */
     val exportAvailable: Boolean get() = !loading && pageCount > 0
+
+    /**
+     * OCRの進捗を出すか（pagebinder-1sd）。
+     *
+     * 待ちが1件でもある間だけ出す。「N件のOCRを予約しました」と「OCR完了 N」の間が
+     * 数分空くことがあり、進捗が無いと予約が通ったのか分からないため。
+     */
+    val ocrInProgress: Boolean get() = !loading && awaitingOcrCount > 0
+
+    /**
+     * 進捗の分母。予約した件数ではなく書籍のOCR対象ページ数を使う。
+     * 予約件数を分母にすると、進行中に撮ったページが分母へ入らず途中でつじつまが合わなくなる。
+     */
+    val ocrTargetCount: Int get() = ocrCompletedCount + awaitingOcrCount + ocrErrorCount
+
+    /** 0除算を避けた進捗率。ゲージは [ocrInProgress] のときだけ描くので分母は必ず正になる */
+    val ocrProgress: Float
+        get() = if (ocrTargetCount == 0) 0f else ocrCompletedCount.toFloat() / ocrTargetCount
 }
 
 class BookDetailViewModel(
@@ -244,6 +264,7 @@ private fun BookDetailUiState.withSummary(summary: BookProjectSummary) =
         note = summary.project.note,
         pageCount = summary.pageCount,
         ocrCompletedCount = summary.ocrCompletedCount,
+        awaitingOcrCount = summary.awaitingOcrCount,
         ocrErrorCount = summary.ocrErrorCount,
         storageBytes = summary.storageBytes,
         operationError = operationError.takeIf { it != BookDetailOperationError.LOAD },

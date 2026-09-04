@@ -3,6 +3,8 @@ package com.pagebinder.app.domain
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -112,6 +114,8 @@ class CaptureOnePageTest {
                         expectedStates: Set<OcrState>,
                     ) = 0
 
+                    override suspend fun countAwaitingOcr(projectId: UUID): Int = 0
+
                     override suspend fun claimNextPending(): OcrPage? = null
 
                     override suspend fun recoverInterrupted() = 0
@@ -141,6 +145,8 @@ class CaptureOnePageTest {
                         projectId: UUID,
                         expectedStates: Set<OcrState>,
                     ) = 0
+
+                    override suspend fun countAwaitingOcr(projectId: UUID): Int = 0
 
                     override suspend fun claimNextPending(): OcrPage? = null
 
@@ -232,6 +238,8 @@ class CaptureOnePageTest {
         override suspend fun findById(id: UUID) = pages.find { it.id == id }
 
         override suspend fun findByProject(projectId: UUID) = pages.filter { it.projectId == projectId }
+
+        override fun observeByProject(projectId: UUID): Flow<List<Page>> = flow { emit(findByProject(projectId)) }
 
         override suspend fun reorder(
             projectId: UUID,

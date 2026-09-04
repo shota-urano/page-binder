@@ -29,6 +29,7 @@ import com.pagebinder.app.domain.PdfMode
 import com.pagebinder.app.domain.PdfPageTransform
 import com.pagebinder.app.domain.StoredOcrResult
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -257,6 +258,8 @@ class ProjectExportStarterTest {
 
         override suspend fun findByProject(projectId: UUID): List<Page> =
             pages.filter { it.projectId == projectId }.shuffled()
+
+        override fun observeByProject(projectId: UUID): Flow<List<Page>> = flow { emit(findByProject(projectId)) }
 
         override suspend fun reorder(
             projectId: UUID,

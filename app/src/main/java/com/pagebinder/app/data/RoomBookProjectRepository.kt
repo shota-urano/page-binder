@@ -28,6 +28,8 @@ data class BookProjectAggregateEntity(
     @Embedded val project: BookProjectEntity,
     val pageCount: Int,
     val ocrCompletedCount: Int = 0,
+    /** OCRの順番待ち（実行待ち＋実行中）。進捗表示を出すかどうかの判断に使う */
+    val awaitingOcrCount: Int = 0,
     val ocrErrorCount: Int = 0,
 )
 
@@ -44,6 +46,7 @@ abstract class BookProjectDao {
         SELECT book_projects.*,
                COALESCE(SUM(CASE WHEN pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS pageCount,
                COALESCE(SUM(CASE WHEN pages.ocr_state = 'succeeded' THEN 1 ELSE 0 END), 0) AS ocrCompletedCount,
+               COALESCE(SUM(CASE WHEN pages.ocr_state IN ('pending', 'running') AND pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS awaitingOcrCount,
                COALESCE(SUM(CASE WHEN pages.ocr_state = 'failed' AND pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS ocrErrorCount
         FROM book_projects
         LEFT JOIN pages ON pages.project_id = book_projects.id
@@ -58,6 +61,7 @@ abstract class BookProjectDao {
         SELECT book_projects.*,
                COALESCE(SUM(CASE WHEN pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS pageCount,
                COALESCE(SUM(CASE WHEN pages.ocr_state = 'succeeded' THEN 1 ELSE 0 END), 0) AS ocrCompletedCount,
+               COALESCE(SUM(CASE WHEN pages.ocr_state IN ('pending', 'running') AND pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS awaitingOcrCount,
                COALESCE(SUM(CASE WHEN pages.ocr_state = 'failed' AND pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS ocrErrorCount
         FROM book_projects
         LEFT JOIN pages ON pages.project_id = book_projects.id
@@ -73,6 +77,7 @@ abstract class BookProjectDao {
         SELECT book_projects.*,
                COALESCE(SUM(CASE WHEN pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS pageCount,
                COALESCE(SUM(CASE WHEN pages.ocr_state = 'succeeded' THEN 1 ELSE 0 END), 0) AS ocrCompletedCount,
+               COALESCE(SUM(CASE WHEN pages.ocr_state IN ('pending', 'running') AND pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS awaitingOcrCount,
                COALESCE(SUM(CASE WHEN pages.ocr_state = 'failed' AND pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS ocrErrorCount
         FROM book_projects
         LEFT JOIN pages ON pages.project_id = book_projects.id
@@ -91,6 +96,7 @@ abstract class BookProjectDao {
         SELECT book_projects.*,
                COALESCE(SUM(CASE WHEN pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS pageCount,
                COALESCE(SUM(CASE WHEN pages.ocr_state = 'succeeded' THEN 1 ELSE 0 END), 0) AS ocrCompletedCount,
+               COALESCE(SUM(CASE WHEN pages.ocr_state IN ('pending', 'running') AND pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS awaitingOcrCount,
                COALESCE(SUM(CASE WHEN pages.ocr_state = 'failed' AND pages.quality_state != 'black' THEN 1 ELSE 0 END), 0) AS ocrErrorCount
         FROM book_projects
         LEFT JOIN pages ON pages.project_id = book_projects.id
@@ -325,6 +331,7 @@ class RoomBookProjectRepository(
             pageCount = pageCount,
             storageBytes = fileStore.sizeBytes(project.id),
             ocrCompletedCount = ocrCompletedCount,
+            awaitingOcrCount = awaitingOcrCount,
             ocrErrorCount = ocrErrorCount,
         )
 

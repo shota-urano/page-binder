@@ -31,6 +31,8 @@ import com.pagebinder.app.ui.ocredit.OcrEditViewModel
 import com.pagebinder.app.ui.pagelist.PageThumbnailLoader
 import com.pagebinder.app.ui.pagelist.PageThumbnailRequest
 import com.pagebinder.app.ui.theme.PageBinderTheme
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import java.time.Instant
 import java.util.UUID
 
@@ -74,6 +76,8 @@ class OcrEditScreenPreviewActivity : ComponentActivity() {
         override suspend fun findById(id: UUID): Page? = page.takeIf { it.id == id }
 
         override suspend fun findByProject(projectId: UUID): List<Page> = listOf(page)
+
+        override fun observeByProject(projectId: UUID): Flow<List<Page>> = flowOf(listOf(page))
 
         override suspend fun reorder(
             projectId: UUID,
@@ -143,6 +147,8 @@ class OcrEditScreenPreviewActivity : ComponentActivity() {
             projectId: UUID,
             expectedStates: Set<OcrState>,
         ): Int = 0
+
+        override suspend fun countAwaitingOcr(projectId: UUID): Int = 0
 
         override suspend fun claimNextPending(): OcrPage? = null
 

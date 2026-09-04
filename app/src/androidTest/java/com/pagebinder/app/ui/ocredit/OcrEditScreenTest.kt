@@ -28,6 +28,7 @@ import com.pagebinder.app.domain.PageRepository
 import com.pagebinder.app.domain.StoredOcrResult
 import com.pagebinder.app.ui.pagelist.PageThumbnailLoader
 import com.pagebinder.app.ui.theme.PageBinderTheme
+import kotlinx.coroutines.flow.Flow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
@@ -247,6 +248,8 @@ class OcrEditScreenTest {
 
         override suspend fun findByProject(projectId: UUID): List<Page> = throw UnsupportedOperationException()
 
+        override fun observeByProject(projectId: UUID): Flow<List<Page>> = throw UnsupportedOperationException()
+
         override suspend fun reorder(
             projectId: UUID,
             orderedPageIds: List<UUID>,
@@ -321,6 +324,8 @@ class OcrEditScreenTest {
             projectId: UUID,
             expectedStates: Set<OcrState>,
         ): Int = throw UnsupportedOperationException()
+
+        override suspend fun countAwaitingOcr(projectId: UUID): Int = throw UnsupportedOperationException()
 
         override suspend fun claimNextPending(): OcrPage? = throw UnsupportedOperationException()
 
