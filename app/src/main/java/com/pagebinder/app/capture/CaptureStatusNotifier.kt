@@ -11,6 +11,7 @@ import com.pagebinder.app.domain.AutoCaptureStopReason
 import com.pagebinder.app.domain.CaptureMode
 import com.pagebinder.app.domain.CaptureOverlayGateway
 import com.pagebinder.app.domain.CaptureOverlayState
+import com.pagebinder.app.domain.CaptureStopReason
 
 /**
  * 撮影中の常駐通知（docs/specs/06-auto-capture.md §3.4 / FR-AUTO-005）。
@@ -88,19 +89,25 @@ class CaptureStatusNotifier(
     }
 
     /** 予期しない停止（OS側の画面共有停止・画面ロック等）を後追いで知らせる単発通知 */
-    fun postUnexpectedStop() {
+    fun postUnexpectedStop(reason: CaptureStopReason) {
         val notification =
             Notification
                 .Builder(appContext, NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_menu_close_clear_cancel)
                 .setContentTitle(appContext.getString(R.string.capture_notification_stopped_title))
-                .setContentText(appContext.getString(R.string.capture_notification_stopped_message))
+                .setContentText(appContext.getString(unexpectedStopMessageRes(reason)))
                 .setAutoCancel(true)
                 .build()
         appContext
             .getSystemService(NotificationManager::class.java)
             .notify(STOPPED_NOTIFICATION_ID, notification)
     }
+
+    private fun unexpectedStopMessageRes(reason: CaptureStopReason): Int =
+        when (reason.stopNotice()) {
+            CaptureStopNotice.GENERIC -> R.string.capture_notification_stopped_message
+            CaptureStopNotice.SELECT_ENTIRE_SCREEN -> R.string.capture_notification_select_entire_screen
+        }
 
     fun createChannel() {
         val channel =

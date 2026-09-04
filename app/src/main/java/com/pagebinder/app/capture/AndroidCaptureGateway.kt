@@ -62,6 +62,25 @@ data class AndroidCapturePermissionResult(
 )
 
 /**
+ * Stops only after shared content has first become visible.
+ *
+ * Android reports the current visibility once capture starts. A single-app share whose selected
+ * app has not yet been brought to the foreground therefore starts with `false`; it must not end
+ * the session before the user can switch to that app.
+ */
+internal class SharedContentVisibilityStopDetector {
+    private var hasBeenVisible = false
+
+    fun shouldStop(isVisible: Boolean): Boolean {
+        if (isVisible) {
+            hasBeenVisible = true
+            return false
+        }
+        return hasBeenVisible
+    }
+}
+
+/**
  * Owns every Android MediaProjection object. Each start consumes one permission result, registers
  * the callback before creating exactly one VirtualDisplay, and clears all references on stop.
  */
@@ -185,6 +204,8 @@ class AndroidCaptureGateway(
 
     private fun projectionCallback(): MediaProjection.Callback =
         object : MediaProjection.Callback() {
+            private val sharedContentVisibilityStopDetector = SharedContentVisibilityStopDetector()
+
             override fun onStop() {
                 synchronized(lock) {
                     releaseResources(stopProjection = false)
@@ -199,6 +220,19 @@ class AndroidCaptureGateway(
                 if (width <= 0 || height <= 0) return
                 synchronized(lock) {
                     resizeCaptureSurface(CaptureSize(width, height))
+                }
+            }
+
+            override fun onCapturedContentVisibilityChanged(isVisible: Boolean) {
+                // This API 34 callback reports the initial state too. Wait until the selected app
+                // was observable once, so a normal share does not stop before its app is foreground.
+                if (
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+                    sharedContentVisibilityStopDetector.shouldStop(isVisible)
+                ) {
+                    eventChannel.trySend(
+                        CaptureGatewayEvent.ProjectionStopped(CaptureStopReason.SHARED_CONTENT_NOT_VISIBLE),
+                    )
                 }
             }
         }
