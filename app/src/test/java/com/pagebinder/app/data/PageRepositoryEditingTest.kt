@@ -5,6 +5,9 @@ import com.pagebinder.app.domain.PageCrop
 import com.pagebinder.app.domain.PageCropScope
 import com.pagebinder.app.domain.PageOcrState
 import com.pagebinder.app.domain.PageQualityState
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -331,7 +334,14 @@ class PageRepositoryEditingTest {
 
 private class InMemoryPageDao : PageDao() {
     private val pages = mutableMapOf<String, PageEntity>()
+    val ocrResults = mutableMapOf<String, OcrResultEntity>()
     private val failingCropIds = mutableSetOf<String>()
+
+    /** 書き換えのたびに値が変わる番号。Room の再クエリと同じく購読へ現在値を流し直す */
+    private val revisions = MutableStateFlow(0)
+
+    override fun observeByProject(projectId: String): Flow<List<PageEntity>> =
+        revisions.map { findByProject(projectId) }
 
     /** 指定ページの切り取り更新を「1行も更新できなかった」状態にする（書き込み途中の失敗を作る） */
     fun failCropUpdatesFor(id: String) {
@@ -354,11 +364,23 @@ private class InMemoryPageDao : PageDao() {
             .onFailure {
                 pages.clear()
                 pages.putAll(snapshot)
+                bumpRevision()
             }.getOrThrow()
     }
 
     override suspend fun insert(page: PageEntity) {
         check(pages.putIfAbsent(page.id.toString(), page) == null)
+        bumpRevision()
+    }
+
+    /** OCR結果もページと同じトランザクションで動く。代役でもその関係を写す（pagebinder-dy7） */
+    override suspend fun findOcrResults(pageIds: List<String>): List<OcrResultEntity> =
+        pageIds.mapNotNull(ocrResults::get)
+
+    override suspend fun deleteOcrResults(pageIds: List<String>): Int = pageIds.count { ocrResults.remove(it) != null }
+
+    override suspend fun insertOcrResults(results: List<OcrResultEntity>) {
+        results.forEach { check(ocrResults.putIfAbsent(it.pageId.toString(), it) == null) }
     }
 
     override suspend fun insertAll(pages: List<PageEntity>) {
@@ -375,7 +397,8 @@ private class InMemoryPageDao : PageDao() {
         sequence: Int,
     ): Int = update(id) { copy(sequence = sequence) }
 
-    override suspend fun deleteByIds(ids: List<String>): Int = ids.count { pages.remove(it) != null }
+    override suspend fun deleteByIds(ids: List<String>): Int =
+        ids.count { pages.remove(it) != null }.also { if (it > 0) bumpRevision() }
 
     override suspend fun updateQualityState(
         id: String,
@@ -444,6 +467,11 @@ private class InMemoryPageDao : PageDao() {
     ): Int {
         val existing = pages[id] ?: return 0
         pages[id] = existing.transform()
+        bumpRevision()
         return 1
+    }
+
+    private fun bumpRevision() {
+        revisions.value++
     }
 }

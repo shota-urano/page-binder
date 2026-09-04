@@ -147,6 +147,28 @@ class RoomBookProjectRepositoryTest {
             }
         }
 
+    /** pagebinder-1sd: 進捗ゲージの分母・表示条件になる待ち件数。黒画面は実行されないので数えない */
+    @Test
+    fun summaryCountsPagesWaitingForOcrWithoutBlackCaptures() =
+        runBlocking {
+            val repository =
+                RoomBookProjectRepository(
+                    dao = database.bookProjectDao(),
+                    fileStore = EmptyProjectFileStore(),
+                    now = { Instant.parse("2026-08-30T00:00:00Z") },
+                    newId = { projectId },
+                )
+            repository.create("Awaiting", null, null)
+            database.pageDao().insert(testPage(projectId, 1, "pending"))
+            database.pageDao().insert(testPage(projectId, 2, "running"))
+            database.pageDao().insert(testPage(projectId, 3, "succeeded"))
+
+            val summary = requireNotNull(repository.findSummaryById(projectId))
+
+            assertEquals(2, summary.awaitingOcrCount)
+            assertEquals(1, summary.ocrCompletedCount)
+        }
+
     @Test
     fun blackCaptureDoesNotIncreaseOcrErrorCount() =
         runBlocking {

@@ -134,8 +134,7 @@ private fun PageBinderMain(
                 is MainDestination.PageList -> MainDestination.Detail(current.projectId)
                 is MainDestination.CapturePrep -> MainDestination.Detail(current.projectId)
                 is MainDestination.Export -> MainDestination.Detail(current.project.projectId)
-                is MainDestination.PageEdit ->
-                    MainDestination.PageList(current.projectId, reloadToken = UUID.randomUUID())
+                is MainDestination.PageEdit -> MainDestination.PageList(current.projectId)
             }
     }
     when (val current = destination) {
@@ -287,10 +286,6 @@ private fun PageBinderMain(
                     key = "page-list-${current.projectId}",
                     factory = PageListViewModel.factory(current.projectId, pageRepository),
                 )
-            // 回転・切り取り編集から戻ったときだけ読み直す（編集結果をサムネイルへ反映するため）
-            LaunchedEffect(current.reloadToken) {
-                if (current.reloadToken != null) pageListViewModel.load()
-            }
             PageListRoute(
                 viewModel = pageListViewModel,
                 thumbnailLoader = pageThumbnailLoader,
@@ -352,10 +347,7 @@ private fun PageBinderMain(
                     factory = PageEditViewModel.factory(current.pageId, pageRepository),
                 )
             val pageEditState by pageEditViewModel.uiState.collectAsStateWithLifecycle()
-            val closePageEdit = {
-                destination =
-                    MainDestination.PageList(current.projectId, reloadToken = UUID.randomUUID())
-            }
+            val closePageEdit = { destination = MainDestination.PageList(current.projectId) }
             // 外側の BackHandler より後に登録されるのでこちらが先に呼ばれる。
             // 未保存の変更があるときは破棄確認を挟む（PageEditRoute の閉じる操作と同じ判断）
             BackHandler {
@@ -382,13 +374,9 @@ private sealed interface MainDestination {
 
     data object Trash : MainDestination
 
-    /**
-     * [reloadToken] はページ編集から戻ったときだけ値が変わり、一覧の読み直しの合図になる
-     * （書籍詳細から入る通常の遷移では null）。
-     */
+    /** 一覧は [com.pagebinder.app.domain.PageRepository] を購読するので、読み直しの合図を持たない */
     data class PageList(
         val projectId: UUID,
-        val reloadToken: UUID? = null,
     ) : MainDestination
 
     data class CapturePrep(

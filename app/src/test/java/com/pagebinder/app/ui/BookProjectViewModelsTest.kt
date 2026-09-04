@@ -214,6 +214,45 @@ class BookDetailViewModelTest : BookProjectViewModelTestBase() {
             assertFalse(viewModel.uiState.value.exportAvailable)
         }
 
+    /**
+     * pagebinder-1sd: 「N件のOCRを予約しました」と「OCR完了 N」の間を進捗で埋める。
+     * 予約が通ったのに何も動かないように見える状態を作らない。
+     */
+    @Test
+    fun `OCR progress shows while pages wait and disappears when the queue empties`() =
+        runTest {
+            val initial = summary(title = "Detail", pageCount = 3, ocrCompleted = 0, awaitingOcr = 3)
+            val repository = FakeBookProjectRepository(active = mutableListOf(initial))
+            val viewModel = BookDetailViewModel(initial.project.id, repository, { 3 }) { emptyList() }
+
+            assertTrue(viewModel.uiState.value.ocrInProgress)
+            assertEquals(3, viewModel.uiState.value.ocrTargetCount)
+            assertEquals(0f, viewModel.uiState.value.ocrProgress)
+
+            // ワーカーが1件終えると、分母は動かないまま分子だけ伸びる
+            repository.publish(initial.copy(ocrCompletedCount = 1, awaitingOcrCount = 2))
+
+            assertTrue(viewModel.uiState.value.ocrInProgress)
+            assertEquals(3, viewModel.uiState.value.ocrTargetCount)
+            assertEquals(1f / 3, viewModel.uiState.value.ocrProgress)
+
+            repository.publish(initial.copy(ocrCompletedCount = 3, awaitingOcrCount = 0))
+
+            assertFalse(viewModel.uiState.value.ocrInProgress)
+            assertEquals(3, viewModel.uiState.value.ocrCompletedCount)
+        }
+
+    /** 失敗したページも分母に残す。進捗が「3件中2件」で止まることで、取りこぼしが見える */
+    @Test
+    fun `OCR progress keeps failed pages in the denominator`() =
+        runTest {
+            val initial = summary(title = "Detail", pageCount = 3, ocrCompleted = 2, awaitingOcr = 1, ocrErrors = 1)
+            val repository = FakeBookProjectRepository(active = mutableListOf(initial))
+            val viewModel = BookDetailViewModel(initial.project.id, repository, { 1 }) { emptyList() }
+
+            assertEquals(4, viewModel.uiState.value.ocrTargetCount)
+        }
+
     @Test
     fun `statistics keep updating while a confirmation dialog is open`() =
         runTest {
@@ -494,6 +533,7 @@ private fun summary(
     pageCount: Int = 0,
     storageBytes: Long = 0,
     ocrCompleted: Int = 0,
+    awaitingOcr: Int = 0,
     ocrErrors: Int = 0,
 ): BookProjectSummary {
     val id = UUID.nameUUIDFromBytes("$title-$updatedAt-$deletedAt".toByteArray())
@@ -511,6 +551,7 @@ private fun summary(
         pageCount = pageCount,
         storageBytes = storageBytes,
         ocrCompletedCount = ocrCompleted,
+        awaitingOcrCount = awaitingOcr,
         ocrErrorCount = ocrErrors,
     )
 }

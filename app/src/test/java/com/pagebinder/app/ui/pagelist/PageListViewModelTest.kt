@@ -8,6 +8,9 @@ import com.pagebinder.app.domain.PageQualityState
 import com.pagebinder.app.domain.PageRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -190,6 +193,37 @@ class PageListViewModelTest {
 
             assertFalse(viewModel.uiState.value.loadFailed)
             assertEquals(5, viewModel.uiState.value.pages.size)
+        }
+
+    @Test
+    fun `撮影で増えたページが読み直しなしで一覧に入る`() =
+        runTest {
+            val repository = FakePageRepository(samplePages())
+            val viewModel = PageListViewModel(projectId, repository)
+            assertEquals(5, viewModel.uiState.value.pages.size)
+
+            // 一覧を開いたまま撮影が1ページ保存した状況（pagebinder-3my）
+            repository.insert(page(6))
+
+            assertEquals(
+                listOf(1, 2, 3, 4, 5, 6),
+                viewModel.uiState.value.pages.map(PageListItemUiState::sequence),
+            )
+        }
+
+    @Test
+    fun `ドラッグ中に届いた購読の値で並びが巻き戻らない`() =
+        runTest {
+            val pages = samplePages()
+            val repository = FakePageRepository(pages)
+            val viewModel = PageListViewModel(projectId, repository)
+            viewModel.onPageMoved(0, 4)
+            val draggedOrder = viewModel.uiState.value.pages.map(PageListItemUiState::pageId)
+
+            // 指を離す前に別経路の保存が流れてきても、指の下の並びは古い順序へ戻さない
+            repository.insert(page(6))
+
+            assertEquals(draggedOrder, viewModel.uiState.value.pages.map(PageListItemUiState::pageId))
         }
 
     @Test
@@ -491,7 +525,7 @@ class PageListViewModelTest {
      * 実際に並びを書き換えるので、操作後の読み直しが何を返すかまで確かめられる。
      */
     private class FakePageRepository(
-        var pages: List<Page>,
+        pages: List<Page>,
         private var failNextReads: Int = 0,
         private val failReorder: Boolean = false,
         private val failDelete: Boolean = false,
@@ -502,9 +536,20 @@ class PageListViewModelTest {
         var undoCalls = 0
             private set
 
+        /** 保存の結果を購読側へ流すための現在値。Room の購読クエリと同じ振る舞いにする */
+        private val storedPages = MutableStateFlow(pages)
+
+        var pages: List<Page>
+            get() = storedPages.value
+            set(value) {
+                storedPages.value = value
+            }
+
         private var undoSnapshot: List<Page>? = null
 
-        override suspend fun insert(page: Page) = throw UnsupportedOperationException()
+        override suspend fun insert(page: Page) {
+            storedPages.value = storedPages.value + page
+        }
 
         override suspend fun findById(id: UUID): Page? = pages.firstOrNull { it.id == id }
 
@@ -515,6 +560,15 @@ class PageListViewModelTest {
             }
             return pages.filter { it.projectId == projectId }
         }
+
+        override fun observeByProject(projectId: UUID): Flow<List<Page>> =
+            storedPages.map { current ->
+                if (failNextReads > 0) {
+                    failNextReads--
+                    throw IOException("read failed")
+                }
+                current.filter { it.projectId == projectId }
+            }
 
         override suspend fun reorder(
             projectId: UUID,

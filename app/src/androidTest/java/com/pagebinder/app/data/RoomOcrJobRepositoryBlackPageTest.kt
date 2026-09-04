@@ -96,14 +96,28 @@ class RoomOcrJobRepositoryBlackPageTest {
             assertEquals(PageOcrState.RUNNING, database.pageDao().findById(id)?.ocrState)
         }
 
+    /** 黒画面は数えない。一括実行の件数表示が、実行されないページを数に入れないため */
+    @Test
+    fun awaitingCountCoversPendingAndRunningWithoutBlackCaptures() =
+        runBlocking {
+            database.pageDao().insert(page("20000000-0000-0000-0000-000000000001", "normal", "pending", 1))
+            database.pageDao().insert(page("20000000-0000-0000-0000-000000000002", "normal", "running", 2))
+            database.pageDao().insert(page("20000000-0000-0000-0000-000000000003", "normal", "succeeded", 3))
+            database.pageDao().insert(page("20000000-0000-0000-0000-000000000004", "black", "pending", 4))
+
+            assertEquals(2, repository.countAwaitingOcr(projectId))
+        }
+
     private fun page(
         id: String,
         qualityState: String,
         ocrState: String,
+        // (project_id, sequence) は一意。3件以上入れるテストは連番を明示する
+        sequence: Int = if (qualityState == "black") 1 else 2,
     ) = PageEntity(
         id = UUID.fromString(id),
         projectId = projectId,
-        sequence = if (qualityState == "black") 1 else 2,
+        sequence = sequence,
         originalImagePath = "projects/$projectId/images/$id.webp",
         width = 1,
         height = 1,

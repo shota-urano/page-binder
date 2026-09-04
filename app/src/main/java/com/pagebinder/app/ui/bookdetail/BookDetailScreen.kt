@@ -31,6 +31,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -64,6 +65,7 @@ import com.pagebinder.app.ui.theme.SpaceUnit
  */
 const val BOOK_DETAIL_PAGE_COUNT_TEST_TAG = "book-detail-page-count"
 const val BOOK_DETAIL_OCR_COMPLETED_TEST_TAG = "book-detail-ocr-completed"
+const val BOOK_DETAIL_OCR_PROGRESS_TEST_TAG = "book-detail-ocr-progress"
 const val BOOK_DETAIL_OCR_ERROR_TEST_TAG = "book-detail-ocr-error"
 const val BOOK_DETAIL_STORAGE_TEST_TAG = "book-detail-storage"
 
@@ -170,8 +172,15 @@ fun BookDetailScreen(
                     uiState.operationError?.takeIf { it != BookDetailOperationError.LOAD }?.let {
                         Text(stringResource(it.messageRes()), color = ColorError)
                     }
-                    uiState.queuedOcrCount?.let {
-                        Text(stringResource(R.string.book_detail_ocr_queued, it), color = ColorTextSecondary)
+                    uiState.queuedOcrCount?.let { count ->
+                        // 0件は「予約できなかった」ではなく「OCR待ちが無い」＝全ページ処理済みを意味する
+                        val message =
+                            if (count == 0) {
+                                stringResource(R.string.book_detail_ocr_nothing_queued)
+                            } else {
+                                stringResource(R.string.book_detail_ocr_queued, count)
+                            }
+                        Text(message, color = ColorTextSecondary)
                     }
                     Spacer(Modifier.padding(bottom = SpaceUnit))
                 }
@@ -299,7 +308,33 @@ private fun StatisticsCard(uiState: BookDetailUiState) {
                     valueTestTag = BOOK_DETAIL_STORAGE_TEST_TAG,
                 )
             }
+            // 予約から完了までの間を埋める（pagebinder-1sd）。待ちが無くなれば消え、数字だけが残る
+            if (uiState.ocrInProgress) {
+                HorizontalDivider(Modifier.padding(vertical = SpaceUnit), color = ColorDivider)
+                OcrProgress(uiState)
+            }
         }
+    }
+}
+
+@Composable
+private fun OcrProgress(uiState: BookDetailUiState) {
+    Column(verticalArrangement = Arrangement.spacedBy(SpaceUnit)) {
+        Text(
+            stringResource(
+                R.string.book_detail_ocr_progress,
+                uiState.ocrCompletedCount,
+                uiState.ocrTargetCount,
+            ),
+            style = MaterialTheme.typography.bodyMedium,
+            color = ColorTextSecondary,
+            modifier = Modifier.testTag(BOOK_DETAIL_OCR_PROGRESS_TEST_TAG),
+        )
+        LinearProgressIndicator(
+            progress = { uiState.ocrProgress },
+            modifier = Modifier.fillMaxWidth(),
+            color = ColorAccent,
+        )
     }
 }
 

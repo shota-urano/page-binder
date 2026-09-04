@@ -23,6 +23,8 @@ import com.pagebinder.app.domain.PageQualityState
 import com.pagebinder.app.domain.PageRepository
 import com.pagebinder.app.ui.pagelist.PageThumbnailLoader
 import com.pagebinder.app.ui.theme.PageBinderTheme
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -266,6 +268,8 @@ class PageEditScreenTest {
         override suspend fun findById(id: UUID): Page? = pages.firstOrNull { it.id == id }
 
         override suspend fun findByProject(projectId: UUID): List<Page> = pages.filter { it.projectId == projectId }
+
+        override fun observeByProject(projectId: UUID): Flow<List<Page>> = flow { emit(findByProject(projectId)) }
 
         override suspend fun reorder(
             projectId: UUID,

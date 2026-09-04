@@ -25,12 +25,18 @@ data class BookProjectSummary(
     val pageCount: Int,
     val storageBytes: Long,
     val ocrCompletedCount: Int = 0,
+    /**
+     * OCRの順番待ち（実行待ち＋実行中）のページ数。
+     * 0 でなければ「予約したがまだ終わっていない」状態で、書籍詳細はこの間だけ進捗を出す。
+     */
+    val awaitingOcrCount: Int = 0,
     val ocrErrorCount: Int = 0,
 ) {
     init {
         require(pageCount >= 0) { "Page count cannot be negative" }
         require(storageBytes >= 0) { "Storage size cannot be negative" }
         require(ocrCompletedCount >= 0) { "OCR completed count cannot be negative" }
+        require(awaitingOcrCount >= 0) { "Awaiting OCR count cannot be negative" }
         require(ocrErrorCount >= 0) { "OCR error count cannot be negative" }
     }
 }

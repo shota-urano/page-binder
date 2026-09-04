@@ -30,6 +30,9 @@ import com.pagebinder.app.domain.PageOcrState
 import com.pagebinder.app.domain.PageQualityState
 import com.pagebinder.app.domain.PageRepository
 import com.pagebinder.app.ui.theme.PageBinderTheme
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -502,7 +505,13 @@ class PageListScreenTest {
 
     /** 画面から出る編集（並べ替え・削除・取り消し）をメモリ上で実際に反映する代役 */
     private class FakePageRepository(initialPages: List<Page>) : PageRepository {
-        private var pages: List<Page> = initialPages
+        /** 保存の結果を購読側へ流すための現在値。Room の購読クエリと同じ振る舞いにする */
+        private val storedPages = MutableStateFlow(initialPages)
+        private var pages: List<Page>
+            get() = storedPages.value
+            set(value) {
+                storedPages.value = value
+            }
         private var undoSnapshot: List<Page>? = null
 
         val reorderCalls = mutableListOf<List<UUID>>()
@@ -513,6 +522,9 @@ class PageListScreenTest {
         override suspend fun findById(id: UUID): Page? = pages.firstOrNull { it.id == id }
 
         override suspend fun findByProject(projectId: UUID): List<Page> = pages.filter { it.projectId == projectId }
+
+        override fun observeByProject(projectId: UUID): Flow<List<Page>> =
+            storedPages.map { current -> current.filter { it.projectId == projectId } }
 
         override suspend fun reorder(
             projectId: UUID,

@@ -106,6 +106,20 @@ interface OcrJobDao {
         expectedStates: Set<String>,
     ): Int
 
+    /**
+     * OCRの順番待ちに載っているページ数。実行待ちと実行中の両方を数える
+     * （一括実行の結果表示が「今回状態を変えた件数」ではなく「これからOCRされる件数」を出すため）。
+     */
+    @Query(
+        """
+        SELECT COUNT(*) FROM pages
+        WHERE project_id = :projectId
+          AND quality_state != 'black'
+          AND ocr_state IN ('pending', 'running')
+        """,
+    )
+    suspend fun countAwaitingOcr(projectId: String): Int
+
     @Query(
         """
         SELECT * FROM pages
@@ -251,6 +265,8 @@ class RoomOcrJobRepository(
             projectId.toString(),
             expectedStates.mapTo(mutableSetOf(), OcrState::serializedName),
         )
+
+    override suspend fun countAwaitingOcr(projectId: UUID): Int = dao.countAwaitingOcr(projectId.toString())
 
     override suspend fun claimNextPending(): OcrPage? = dao.claimNextPending()?.toOcrPage()
 

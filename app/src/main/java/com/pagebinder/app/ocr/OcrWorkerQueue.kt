@@ -50,9 +50,17 @@ class WorkManagerOcrQueueScheduler internal constructor(
         cancelWork()
     }
 
+    /**
+     * 撮影が終わったので OCR を動かす。ここだけ [ExistingWorkPolicy.REPLACE] を使う。
+     *
+     * 撮影中に起きたワーカーは実行できずに retry を返す。retry は線形バックオフ（10秒×試行回数）
+     * なので、撮影が長いほど次の起動が先送りされ、撮影を止めても数分待たされることがあった
+     * （pagebinder-6z1 の実測: 撮影中に retry → 停止後もバックオフ残り分だけ待つ）。
+     * REPLACE は積み上がった試行回数ごと作り直すので、停止した時点から始まる。
+     */
     override fun onSessionIdle() {
         CapturePriorityGate.isCaptureActive = false
-        wake()
+        enqueueWork(ExistingWorkPolicy.REPLACE)
     }
 }
 

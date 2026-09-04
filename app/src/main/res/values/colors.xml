@@ -2,4 +2,6 @@
 <resources>
     <!-- docs/design/system/01-tokens.md の color-background（起動時のウィンドウ地色用） -->
     <color name="pagebinder_background">#F8FAFC</color>
+    <!-- ランチャーアイコンの地色。ロゴの青とミントをそのまま出すため白 -->
+    <color name="ic_launcher_background">#FFFFFF</color>
 </resources>

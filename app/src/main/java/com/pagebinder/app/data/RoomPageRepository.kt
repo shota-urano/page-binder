@@ -12,6 +12,8 @@ import com.pagebinder.app.domain.PageQualityState
 import com.pagebinder.app.domain.PageRepository
 import com.pagebinder.app.domain.PageRepositoryException
 import com.pagebinder.app.domain.VALID_PAGE_ROTATIONS
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import java.util.UUID
 
 @Dao
@@ -30,6 +32,13 @@ abstract class PageDao {
     @Query("SELECT * FROM pages WHERE project_id = :projectId ORDER BY sequence")
     abstract suspend fun findByProject(projectId: String): List<PageEntity>
 
+    /**
+     * [findByProject] と同じ並びを購読する。`pages` を読むので、撮影による追加・削除・編集で
+     * Room が再クエリして現在値を流し直す（一覧を開いたままでも撮影結果が入る）。
+     */
+    @Query("SELECT * FROM pages WHERE project_id = :projectId ORDER BY sequence")
+    abstract fun observeByProject(projectId: String): Flow<List<PageEntity>>
+
     @Query("UPDATE pages SET sequence = :sequence WHERE id = :id")
     protected abstract suspend fun updateSequence(
         id: String,
@@ -38,6 +47,20 @@ abstract class PageDao {
 
     @Query("DELETE FROM pages WHERE id IN (:ids)")
     protected abstract suspend fun deleteByIds(ids: List<String>): Int
+
+    /**
+     * 削除するページのOCR結果。`ocr_results` は `pages` への外部キーを持たないので、
+     * ページを消すときに一緒に消さないと孤児行が残る（pagebinder-dy7）。
+     * 取り消しで戻せるよう、消す前にここで控える。
+     */
+    @Query("SELECT * FROM ocr_results WHERE page_id IN (:pageIds)")
+    protected abstract suspend fun findOcrResults(pageIds: List<String>): List<OcrResultEntity>
+
+    @Query("DELETE FROM ocr_results WHERE page_id IN (:pageIds)")
+    protected abstract suspend fun deleteOcrResults(pageIds: List<String>): Int
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    protected abstract suspend fun insertOcrResults(results: List<OcrResultEntity>)
 
     @Transaction
     open suspend fun rollbackCaptureInsert(
@@ -152,7 +175,10 @@ abstract class PageDao {
             currentPages.filter {
                 it.id.toString() in resolvedDuplicatePageIds && it.qualityState == PageQualityState.DUPLICATE
             }
+        // ページと同じトランザクションでOCR結果も消す。片方だけ残ると孤児行になる（pagebinder-dy7）
+        val deletedOcrResults = if (pageIds.isEmpty()) emptyList() else findOcrResults(pageIds.toList())
         if (pageIds.isNotEmpty()) {
+            deleteOcrResults(pageIds.toList())
             check(deleteByIds(pageIds.toList()) == pageIds.size) { "Page delete did not affect every selected row" }
             rewriteSequences(currentIds.filterNot(pageIds::contains))
         }
@@ -166,6 +192,7 @@ abstract class PageDao {
                 projectId = projectId,
                 orderedPageIds = currentIds,
                 deletedPages = deletedPages,
+                deletedOcrResults = deletedOcrResults,
                 resolvedQualityStates = resolvedPages.map(PageEntity::toQualityUndoAction),
             )
     }
@@ -254,6 +281,8 @@ abstract class PageDao {
                 val remainingIds = findByProject(action.projectId).map { it.id.toString() }
                 stageSequences(remainingIds)
                 insertAll(action.deletedPages)
+                // ページと一緒に消したOCR結果も同じ1操作で戻す（消したページの本文が失われないため）
+                insertOcrResults(action.deletedOcrResults)
                 assignFinalSequences(action.orderedPageIds)
             }
             is PageUndoAction.Rotation -> restore(action)
@@ -331,6 +360,9 @@ class RoomPageRepository(
     override suspend fun findByProject(projectId: UUID): List<Page> =
         dao.findByProject(projectId.toString()).map(PageEntity::toDomain)
 
+    override fun observeByProject(projectId: UUID): Flow<List<Page>> =
+        dao.observeByProject(projectId.toString()).map { pages -> pages.map(PageEntity::toDomain) }
+
     override suspend fun reorder(
         projectId: UUID,
         orderedPageIds: List<UUID>,
@@ -402,6 +434,8 @@ private sealed interface PageUndoAction {
         val projectId: String,
         val orderedPageIds: List<String>,
         val deletedPages: List<PageEntity>,
+        /** 削除と同時に消したOCR結果。取り消しで一緒に戻す */
+        val deletedOcrResults: List<OcrResultEntity> = emptyList(),
         /** 削除と同時に消した重複警告。取り消しで一緒に戻す */
         val resolvedQualityStates: List<Quality> = emptyList(),
     ) : PageUndoAction

@@ -9,6 +9,8 @@ import com.pagebinder.app.domain.PageRepository
 import com.pagebinder.app.ui.pagelist.PageListItemUiState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -533,6 +535,8 @@ class DuplicateReviewViewModelTest {
             }
             return pages.filter { it.projectId == projectId }
         }
+
+        override fun observeByProject(projectId: UUID): Flow<List<Page>> = flow { emit(findByProject(projectId)) }
 
         override suspend fun reorder(
             projectId: UUID,

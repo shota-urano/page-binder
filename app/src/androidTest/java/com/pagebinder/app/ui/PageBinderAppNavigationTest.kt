@@ -393,6 +393,8 @@ class PageBinderAppNavigationTest {
 
         override suspend fun findByProject(projectId: UUID): List<Page> = pages
 
+        override fun observeByProject(projectId: UUID): Flow<List<Page>> = flowOf(pages)
+
         override suspend fun reorder(
             projectId: UUID,
             orderedPageIds: List<UUID>,
